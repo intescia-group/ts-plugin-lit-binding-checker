@@ -263,37 +263,53 @@ export function runChecksOnSourceFile(
     if (attr === 'role') return true;
     return false;
   }
-  function collectStaticAttrsFromTemplate(tagged: ts.TaggedTemplateExpression, file: ts.SourceFile): StaticAttr[] {
-    const out: StaticAttr[] = [];
-    const { text } = rebuildTemplateAndOffsets(tagged, file);
+
+  function collectStaticAttrsFromTemplate(
+    tagged: ts.TaggedTemplateExpression,
+    sf: ts.SourceFile
+  ): Array<StaticAttr> {
+    const out: Array<StaticAttr> = [];
+    const { text } = rebuildTemplateAndOffsets(tagged, sf);
+
+    // 1) scrub les expressions ${...}
     const scrubbed = text.replace(/\${[\S\s]*?}/g, '§EXPR§');
 
-    const tagRe = /<\s*([\da-z-]+)\b([^>]*?)>/gi; let m: RegExpExecArray | null;
+    // util: masquer les contenus entre guillemets en gardant la même longueur
+    const maskQuoted = (s: string) =>
+      s.replace(/"[^"]*"|'[^']*'/g, (m) => m[0] + '§'.repeat(m.length - 2) + m[m.length - 1]);
+
+    const tagRe = /<\s*([\da-z-]+)\b([^>]*?)>/gi;
+    let m: RegExpExecArray | null;
+
     while ((m = tagRe.exec(scrubbed))) {
       const tag = m[1].toLowerCase();
       const attrsChunk = m[2];
       if (isNativeTag(tag)) continue;
 
+      // 2) on matche sur la version masquée pour ne jamais “voir” l’intérieur des valeurs
+      const masked = maskQuoted(attrsChunk);
       const attrRe = /([.:?@]?)([\w:-]+)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=>]+))?/g;
+
       let a: RegExpExecArray | null;
-      while ((a = attrRe.exec(attrsChunk))) {
+      while ((a = attrRe.exec(masked))) {
         const prefix = a[1];
         const rawName = a[2];
         const attrStartInTag = a.index;
-        const indexInText = m.index + m[0].indexOf(attrsChunk) + attrStartInTag;
 
         if (prefix === '.' || prefix === '@' || prefix === '?') continue;
         if (!rawName) continue;
-        const name = rawName.toLowerCase();
 
+        const name = rawName.toLowerCase();
         if (isGlobalAttr(name)) continue;
         if (name === 'part' || name === 'slot') continue;
         if (name.startsWith('xmlns')) continue;
 
-        const slice = attrsChunk.slice(attrStartInTag, attrStartInTag + a[0].length);
-        if (slice.includes('§EXPR§')) continue;
+        // slice original (non masqué) pour les checks
+        const attrSliceStr = attrsChunk.slice(attrStartInTag, attrStartInTag + a[0].length);
+        if (attrSliceStr.includes('§EXPR§')) continue; // FIX: vrai includes
+        const hasEquals = attrSliceStr.includes('=');
 
-        const hasEquals = slice.includes('=');
+        const indexInText = m.index + m[0].indexOf(attrsChunk) + attrStartInTag;
         out.push({ tag, attr: name, booleanish: !hasEquals, indexInText });
       }
     }
