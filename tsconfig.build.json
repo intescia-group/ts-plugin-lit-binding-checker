@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2019",
+    "module": "commonjs",
+    "declaration": true,
+    "outDir": "dist",
+    "lib": ["ES2020"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmitOnError": false,
+    "types": ["typescript","node"],
+    "esModuleInterop": true
+  },
+  "include": ["src/**/*"]
+}

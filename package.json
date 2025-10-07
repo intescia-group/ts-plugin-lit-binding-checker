@@ -1,0 +1,32 @@
+{
+  "name": "@intescia/ts-plugin-lit-binding-checker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TypeScript Language Service plugin: checks Lit templates .prop bindings & static attributes against child components (scopedElements).",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "lit-binding-check": "dist/cli.js"
+  },
+  "scripts": {
+    "check": "node dist/cli.js tsconfig.json --ignore-undefined",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "devDependencies": {
+    "@types/node": "^24.7.0",
+    "semantic-release": "^24.2.9",
+    "typescript": "^5.6.0"
+  },
+  "keywords": [
+    "typescript",
+    "plugin",
+    "language-service",
+    "lit",
+    "web-components"
+  ],
+  "author": "",
+  "license": "MIT"
+}
