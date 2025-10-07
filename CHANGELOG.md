@@ -1,3 +1,11 @@
+## [1.0.2](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.0.1...v1.0.2) (2025-10-07)
+
+
+### Bug Fixes
+
+* revert last commit ([c599522](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/c599522762a298c74b38d32eb89da7f78e7ffe4c))
+* use NODE_AUTH_TOKEN instead of NPM_TOKEN ([bd8bdb2](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/bd8bdb203c97ed683d37b4dc6d02cdc35bb2634c))
+
 ## [1.0.1](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.0.0...v1.0.1) (2025-10-07)
 
 
