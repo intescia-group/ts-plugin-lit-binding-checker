@@ -268,10 +268,13 @@ function runChecksOnSourceFile(ts, program, sf, opts) {
             return true;
         return false;
     }
-    function collectStaticAttrsFromTemplate(tagged, file) {
+    function collectStaticAttrsFromTemplate(tagged, sf) {
         const out = [];
-        const { text } = rebuildTemplateAndOffsets(tagged, file);
+        const { text } = rebuildTemplateAndOffsets(tagged, sf);
+        // 1) scrub les expressions ${...}
         const scrubbed = text.replace(/\${[\S\s]*?}/g, '§EXPR§');
+        // util: masquer les contenus entre guillemets en gardant la même longueur
+        const maskQuoted = (s) => s.replace(/"[^"]*"|'[^']*'/g, (m) => m[0] + '§'.repeat(m.length - 2) + m[m.length - 1]);
         const tagRe = /<\s*([\da-z-]+)\b([^>]*?)>/gi;
         let m;
         while ((m = tagRe.exec(scrubbed))) {
@@ -279,13 +282,14 @@ function runChecksOnSourceFile(ts, program, sf, opts) {
             const attrsChunk = m[2];
             if (isNativeTag(tag))
                 continue;
+            // 2) on matche sur la version masquée pour ne jamais “voir” l’intérieur des valeurs
+            const masked = maskQuoted(attrsChunk);
             const attrRe = /([.:?@]?)([\w:-]+)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=>]+))?/g;
             let a;
-            while ((a = attrRe.exec(attrsChunk))) {
+            while ((a = attrRe.exec(masked))) {
                 const prefix = a[1];
                 const rawName = a[2];
                 const attrStartInTag = a.index;
-                const indexInText = m.index + m[0].indexOf(attrsChunk) + attrStartInTag;
                 if (prefix === '.' || prefix === '@' || prefix === '?')
                     continue;
                 if (!rawName)
@@ -297,10 +301,12 @@ function runChecksOnSourceFile(ts, program, sf, opts) {
                     continue;
                 if (name.startsWith('xmlns'))
                     continue;
-                const slice = attrsChunk.slice(attrStartInTag, attrStartInTag + a[0].length);
-                if (slice.includes('§EXPR§'))
-                    continue;
-                const hasEquals = slice.includes('=');
+                // slice original (non masqué) pour les checks
+                const attrSliceStr = attrsChunk.slice(attrStartInTag, attrStartInTag + a[0].length);
+                if (attrSliceStr.includes('§EXPR§'))
+                    continue; // FIX: vrai includes
+                const hasEquals = attrSliceStr.includes('=');
+                const indexInText = m.index + m[0].indexOf(attrsChunk) + attrStartInTag;
                 out.push({ tag, attr: name, booleanish: !hasEquals, indexInText });
             }
         }

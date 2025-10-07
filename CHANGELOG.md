@@ -1,3 +1,10 @@
+## [1.0.3](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.0.2...v1.0.3) (2025-10-07)
+
+
+### Bug Fixes
+
+* better handling attributes ([dd98171](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/dd98171442462fbe1b374579a5837f593d7f2270))
+
 ## [1.0.2](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.0.1...v1.0.2) (2025-10-07)
 
 
