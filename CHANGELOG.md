@@ -1,3 +1,10 @@
+## [1.0.4](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.0.3...v1.0.4) (2025-10-08)
+
+
+### Bug Fixes
+
+* handle ?: as undefined ([5a4c2c9](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/5a4c2c9e4c23967721134f72e96ef11234f9be9c))
+
 ## [1.0.3](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.0.2...v1.0.3) (2025-10-07)
 
 
