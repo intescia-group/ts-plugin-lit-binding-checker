@@ -30,6 +30,7 @@ export function runChecksOnSourceFile(
   const scopedElementsCache = new WeakMap<ts.ClassDeclaration, Map<string, ts.Expression>>();
   const instanceTypeCache = new WeakMap<ts.Expression, ts.Type>();
   const propTypeCache = new WeakMap<ts.Type, Map<string, ts.Type | null>>();
+  const propOptionalCache = new WeakMap<ts.Type, Map<string, boolean>>();
   const arrayElemTypeCache = new WeakMap<ts.Type, ts.Type | null>();
   const widenedTypeCache = new WeakMap<ts.Type, ts.Type>();
 
@@ -132,6 +133,30 @@ export function runChecksOnSourceFile(
     if (v) instanceTypeCache.set(expr, v);
     return v;
   }
+function typeContainsUndefined(t: ts.Type): boolean {
+  if (t.flags & ts.TypeFlags.Undefined) return true;
+  if (t.flags & ts.TypeFlags.Union) {
+    const ut = t as ts.UnionType;
+    return ut.types.some(typeContainsUndefined);
+  }
+  return false;
+}
+
+function forAllNonUndefinedConstituentsAssignableTo(
+  valueType: ts.Type,
+  targetType: ts.Type,
+  checker: ts.TypeChecker
+): boolean {
+  if (valueType.flags & ts.TypeFlags.Union) {
+    const ut = valueType as ts.UnionType;
+    // Tous les constituants (sauf undefined) doivent être assignables
+    return ut.types
+      .filter(t => !(t.flags & ts.TypeFlags.Undefined))
+      .every(t => checker.isTypeAssignableTo(t, targetType));
+  }
+  // Pas une union -> test simple
+  return checker.isTypeAssignableTo(valueType, targetType);
+}
 
   function getPropTypeOnElementClass(elemInstanceType: ts.Type, propName: string): ts.Type | null {
     let map = propTypeCache.get(elemInstanceType);
@@ -156,6 +181,24 @@ export function runChecksOnSourceFile(
     }
     map.set(propName, result);
     return result;
+  }
+
+  function getPropOptionalOnElementClass(elemInstanceType: ts.Type, propName: string): boolean {
+    let map = propOptionalCache.get(elemInstanceType);
+    if (!map) { map = new Map(); propOptionalCache.set(elemInstanceType, map); }
+    if (map.has(propName)) return map.get(propName)!;
+
+    const sym = elemInstanceType.getProperty(propName);
+    if (!sym) { map.set(propName, false); return false; }
+    const decl = (sym as any).valueDeclaration ?? sym.declarations?.[0];
+    if (!decl) { map.set(propName, false); return false; }
+
+    let isOptional = false;
+    if (ts.isPropertyDeclaration(decl) || ts.isParameter(decl)) {
+      isOptional = !!(decl as any).questionToken;
+    }
+    map.set(propName, isOptional);
+    return isOptional;
   }
 
   function getArrayElementType(t: ts.Type): ts.Type | null {
@@ -370,6 +413,12 @@ export function runChecksOnSourceFile(
 
             const elemOfProp = getArrayElementType(propTypeW);
             if (!ok && elemOfProp && isEmptyArrayLiteral(b.expr)) ok = true;
+
+            // Accept T | undefined when the target property is declared optional (with '?')
+            const propIsOptional = getPropOptionalOnElementClass(instanceType, b.prop);
+            if (!ok && propIsOptional && typeContainsUndefined(exprTypeW)) {
+              ok = forAllNonUndefinedConstituentsAssignableTo(exprTypeW, propTypeW, checker);
+            }
 
             if (!ok && IGNORE_UNDEFINED) {
               const exprAdj = dropUndefinedForAssignability(exprTypeW);
