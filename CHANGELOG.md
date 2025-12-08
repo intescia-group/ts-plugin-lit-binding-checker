@@ -1,3 +1,10 @@
+## [1.0.5](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.0.4...v1.0.5) (2025-12-08)
+
+
+### Bug Fixes
+
+* try to debug diag on window ([a358605](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/a358605c39d240644cd44a60150276b19cbe1f08))
+
 ## [1.0.4](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.0.3...v1.0.4) (2025-10-08)
 
 
