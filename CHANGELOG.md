@@ -1,3 +1,10 @@
+## [1.0.6](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.0.5...v1.0.6) (2025-12-08)
+
+
+### Bug Fixes
+
+* add some logs to debug windows ([6add86f](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/6add86f07140ac2906b5a8bddfd951dda49a0025))
+
 ## [1.0.5](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.0.4...v1.0.5) (2025-12-08)
 
 
