@@ -23,7 +23,9 @@ function init(modules: { typescript: TS }) {
       const prior = oldLS.getSemanticDiagnostics(fileName);
       const program = oldLS.getProgram?.();
       if (!program) return prior;
-      const sf = program.getSourceFile(fileName);
+      // Normalize path for cross-platform compatibility (Windows uses backslashes)
+      const normalizedFileName = fileName.replace(/\\/g, '/');
+      const sf = program.getSourceFile(fileName) ?? program.getSourceFile(normalizedFileName);
       if (!sf) return prior;
       try {
         const ours = runChecksOnSourceFile(ts, program, sf, config);
