@@ -163,8 +163,8 @@ function init(modules: { typescript: TS }) {
       }
     };
 
-    proxy.getDefinitionAtPosition = (fileName: string, position: number): readonly ts.DefinitionInfo[] | undefined => {
-      const prior = oldLS.getDefinitionAtPosition(fileName, position);
+    proxy.getDefinitionAndBoundSpan = (fileName: string, position: number): ts.DefinitionInfoAndBoundSpan | undefined => {
+      const prior = oldLS.getDefinitionAndBoundSpan(fileName, position);
       const program = oldLS.getProgram?.();
       if (!program) return prior;
 
@@ -172,20 +172,16 @@ function init(modules: { typescript: TS }) {
       const sf = program.getSourceFile(fileName) ?? program.getSourceFile(normalizedFileName);
       if (!sf) return prior;
 
-      // Find the tag name at the cursor position within a template literal
       const tagInfo = findTagAtPosition(ts, sf, position);
       if (!tagInfo) return prior;
 
-      // Find the class containing this template
       const containingClass = findContainingLitClass(ts, sf, position, program.getTypeChecker());
       if (!containingClass) return prior;
 
-      // Get scopedElements map and find the component class
       const scopedMap = readScopedElementsMap(ts, containingClass);
       const componentExpr = scopedMap.get(tagInfo.tagName);
       if (!componentExpr) return prior;
 
-      // Get the definition of the component class
       const checker = program.getTypeChecker();
       const symbol = checker.getSymbolAtLocation(componentExpr);
       if (!symbol) return prior;
@@ -205,7 +201,12 @@ function init(modules: { typescript: TS }) {
         containerKind: ts.ScriptElementKind.unknown,
       };
 
-      return prior ? [...prior, definition] : [definition];
+      const textSpan = ts.createTextSpan(tagInfo.start, tagInfo.end - tagInfo.start);
+      const priorDefs = prior?.definitions ?? [];
+      return {
+        definitions: [...priorDefs, definition],
+        textSpan,
+      };
     };
 
     return proxy;
