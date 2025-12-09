@@ -8,6 +8,8 @@ ignoreUndefined?: boolean;
 ignoreAttribute?: boolean;
 /** Print lightweight cache traces to tsserver log. */
 debugCache?: boolean;
+/** List of regex patterns to ignore files. */
+ignoreFiles?: string[];
 }
 
 export type TS = typeof ts;

@@ -34,10 +34,27 @@ function formatDiag(sf: ts.SourceFile, d: ts.Diagnostic) {
 
 (async () => {
   const tsconfig = process.argv[2] || 'tsconfig.json';
+  
+  // Parse --ignore-files patterns
+  const ignoreFiles: string[] = [];
+  for (let i = 2; i < process.argv.length; i++) {
+    if (process.argv[i] === '--ignore-files' && process.argv[i + 1]) {
+      ignoreFiles.push(...process.argv[i + 1].split(','));
+      i++;
+    }
+  }
+
   const opts: PluginOptions = {
     ignoreUndefined: process.argv.includes('--ignore-undefined'),
     ignoreAttribute: process.argv.includes('--ignore-attribute'),
     debugCache: process.argv.includes('--debug-cache'),
+    ignoreFiles,
+  };
+
+  const ignorePatterns = ignoreFiles.map(p => new RegExp(p));
+  const shouldIgnoreFile = (fileName: string): boolean => {
+    const normalized = fileName.replace(/\\/g, '/');
+    return ignorePatterns.some(re => re.test(normalized));
   };
 
   const parsed = parseConfig(tsconfig);
@@ -46,6 +63,7 @@ function formatDiag(sf: ts.SourceFile, d: ts.Diagnostic) {
   let count = 0;
   for (const sf of program.getSourceFiles()) {
     if (sf.isDeclarationFile) continue;
+    if (shouldIgnoreFile(sf.fileName)) continue;
     const diags = runChecksOnSourceFile(ts as any, program, sf, opts);
     for (const d of diags) {
       const file = d.file ?? sf;

@@ -164,6 +164,13 @@ function init(modules: { typescript: TS }) {
       ignoreUndefined: (info.config as any)?.ignoreUndefined ?? false,
       ignoreAttribute: (info.config as any)?.ignoreAttribute ?? false,
       debugCache: (info.config as any)?.debugCache ?? false,
+      ignoreFiles: (info.config as any)?.ignoreFiles ?? [],
+    };
+
+    const ignorePatterns = (config.ignoreFiles ?? []).map(p => new RegExp(p));
+    const shouldIgnoreFile = (fileName: string): boolean => {
+      const normalized = fileName.replace(/\\/g, '/');
+      return ignorePatterns.some(re => re.test(normalized));
     };
 
     const proxy: ts.LanguageService = Object.create(null);
@@ -175,6 +182,7 @@ function init(modules: { typescript: TS }) {
 
     proxy.getSemanticDiagnostics = (fileName: string) => {
       const prior = oldLS.getSemanticDiagnostics(fileName);
+      if (shouldIgnoreFile(fileName)) return prior;
       const program = oldLS.getProgram?.();
       if (!program) return prior;
       // Normalize path for cross-platform compatibility (Windows uses backslashes)
