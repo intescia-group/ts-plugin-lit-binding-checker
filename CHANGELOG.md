@@ -1,3 +1,19 @@
+# [1.1.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.0.6...v1.1.0) (2025-12-09)
+
+
+### Bug Fixes
+
+* case-insensitive attribute matching for boolean properties ([40722d1](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/40722d16adde74a4a441e0786f7f0e0e634a318e))
+* normalize file paths for Windows compatibility ([47ab72f](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/47ab72fd5d9e033e61833c3c70444e6ff531ae9d))
+
+
+### Features
+
+* add go-to-definition for scoped elements in templates ([401a112](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/401a112e48d956714cfc501e48d2ab9dabd04b95))
+* add go-to-definition for scoped elements in templates ([746673d](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/746673dcb5d1f7a3b4a8395b6bcfae18969bfdca))
+* add ignoreFiles option to exclude files by regex patterns ([7e7a8c9](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/7e7a8c9ca5c0fa8fc4fff09ebba8986048908288))
+* support dynamic this.registry.define() for scoped elements ([894ba9f](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/894ba9f88595191420cd18a9635db45ebd286652))
+
 ## [1.0.6](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.0.5...v1.0.6) (2025-12-08)
 
 
