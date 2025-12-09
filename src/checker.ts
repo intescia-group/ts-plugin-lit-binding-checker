@@ -87,6 +87,8 @@ export function runChecksOnSourceFile(
 
   function readScopedElementsMapRaw(cls: ts.ClassDeclaration): ScopedMap {
     const map: ScopedMap = new Map();
+    
+    // 1) Static scopedElements property
     const staticProp = cls.members.find(
       m => ts.isPropertyDeclaration(m) &&
       m.modifiers?.some(md => md.kind === ts.SyntaxKind.StaticKeyword) &&
@@ -98,9 +100,9 @@ export function runChecksOnSourceFile(
         const key = ts.isIdentifier(p.name) ? p.name.text : ts.isStringLiteral(p.name) ? p.name.text : undefined;
         if (key) map.set(key, p.initializer);
       }
-      return map;
     }
 
+    // 2) Static scopedElements getter
     const staticGetter = cls.members.find(
       m => ts.isGetAccessor(m) &&
       m.modifiers?.some(md => md.kind === ts.SyntaxKind.StaticKeyword) &&
@@ -117,6 +119,32 @@ export function runChecksOnSourceFile(
         }
       }
     }
+
+    // 3) Dynamic this.registry?.define() calls throughout the class
+    const visitForRegistryDefine = (node: ts.Node) => {
+      if (ts.isCallExpression(node)) {
+        const expr = node.expression;
+        // Match: this.registry?.define(...) or this.registry.define(...)
+        if (ts.isPropertyAccessExpression(expr) && expr.name.text === 'define') {
+          const obj = expr.expression;
+          // this.registry?.define or this.registry.define
+          const isRegistryDefine = 
+            (ts.isPropertyAccessExpression(obj) && obj.name.text === 'registry') ||
+            (ts.isNonNullExpression(obj) && ts.isPropertyAccessExpression(obj.expression) && obj.expression.name.text === 'registry');
+          
+          if (isRegistryDefine && node.arguments.length >= 2) {
+            const tagArg = node.arguments[0];
+            const classArg = node.arguments[1];
+            if (ts.isStringLiteral(tagArg)) {
+              map.set(tagArg.text, classArg);
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, visitForRegistryDefine);
+    };
+    cls.forEachChild(visitForRegistryDefine);
+
     return map;
   }
   const readScopedElementsMap = (cls: ts.ClassDeclaration): { map: ScopedMap } => {
