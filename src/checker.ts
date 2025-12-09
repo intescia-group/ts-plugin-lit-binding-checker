@@ -38,6 +38,23 @@ export function runChecksOnSourceFile(
   const isNativeTag = (tag: string) => (!tag.includes('-')) || KNOWN_HTML_TAGS.has(tag) || KNOWN_SVG_TAGS.has(tag);
   const kebabToCamel = (s: string) => s.replace(/-([\da-z])/g, (_m, c: string) => c.toUpperCase());
 
+  /** Find property name on element matching attribute (case-insensitive) */
+  function findPropertyNameForAttribute(elemInstanceType: ts.Type, attrName: string): string | null {
+    // First try exact match with kebab-to-camel conversion
+    const camelName = kebabToCamel(attrName);
+    if (elemInstanceType.getProperty(camelName)) return camelName;
+    
+    // Then try case-insensitive match (for attributes like showListing -> showlisting)
+    const props = elemInstanceType.getProperties();
+    const lowerAttr = attrName.toLowerCase();
+    for (const prop of props) {
+      if (prop.getName().toLowerCase() === lowerAttr) {
+        return prop.getName();
+      }
+    }
+    return null;
+  }
+
   const typeToString = (t: ts.Type) =>
     checker.typeToString(
       t,
@@ -459,12 +476,11 @@ function forAllNonUndefinedConstituentsAssignableTo(
               }
 
               const instanceType = getInstanceTypeFromClassRef(elemExpr) || checker.getTypeAtLocation(elemExpr);
-              const propName = kebabToCamel(sa.attr);
-              const propType = getPropTypeOnElementClass(instanceType, propName);
-              if (!propType) {
+              const propName = findPropertyNameForAttribute(instanceType, sa.attr);
+              if (!propName) {
                 diags.push({
                   file: sf, category: ts.DiagnosticCategory.Warning, code: 90021,
-                  messageText: `${clsName} → <${sa.tag}> attribut inconnu: ${sa.attr} (propriété "${propName}" absente)`,
+                  messageText: `${clsName} → <${sa.tag}> attribut inconnu: ${sa.attr}`,
                   start: pos, length: sa.attr.length
                 });
               }
