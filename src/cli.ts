@@ -29,7 +29,8 @@ function parseConfig(tsconfigPath: string) {
 function formatDiag(sf: ts.SourceFile, d: ts.Diagnostic) {
   const { line, character } = sf.getLineAndCharacterOfPosition(d.start ?? 0);
   const msg = ts.flattenDiagnosticMessageText(d.messageText, '\n');
-  return `${sf.fileName}:${line + 1}:${character + 1} - ${msg} (code ${d.code})`;
+  const level = d.category === ts.DiagnosticCategory.Error ? 'error' : 'warning';
+  return `${sf.fileName}:${line + 1}:${character + 1}: ${level}: ${msg}`;
 }
 
 (async () => {
