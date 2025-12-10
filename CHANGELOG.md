@@ -1,3 +1,16 @@
+# [1.2.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.1.0...v1.2.0) (2025-12-10)
+
+
+### Bug Fixes
+
+* resolve go-to-definition to actual file for dynamic imports ([b9e8a0c](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/b9e8a0c9f1e90a454f0dcfe0c1af55869788957f))
+
+
+### Features
+
+* add go-to-definition for CustomEvent listeners ([@event](https://github.com/event)) ([930c4ee](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/930c4eebb5cc351211a8f0ed2d90926e3dfd5edb))
+* add go-to-definition for properties and attributes in templates ([1007d4c](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/1007d4c64ada51db8e4ef027c52c811788d0e70f))
+
 # [1.1.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.0.6...v1.1.0) (2025-12-09)
 
 
