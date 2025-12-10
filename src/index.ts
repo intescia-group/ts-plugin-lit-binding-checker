@@ -16,6 +16,69 @@ interface PropertyAtPosition {
   end: number;
 }
 
+interface EventAtPosition {
+  tagName: string;
+  eventName: string;
+  start: number;
+  end: number;
+}
+
+/** Find an event listener (@event-name) at the given position within a template literal */
+function findEventAtPosition(ts: TS, sf: ts.SourceFile, position: number): EventAtPosition | null {
+  let result: EventAtPosition | null = null;
+
+  const visit = (node: ts.Node) => {
+    if (result) return;
+
+    if (ts.isTaggedTemplateExpression(node)) {
+      const { tag, template } = node;
+      const isHtmlTag =
+        (ts.isIdentifier(tag) && tag.text === 'html') ||
+        (ts.isPropertyAccessExpression(tag) && tag.name.text === 'html');
+
+      if (isHtmlTag && position >= template.getStart() && position <= template.getEnd()) {
+        const templateText = template.getText();
+        const templateStart = template.getStart();
+
+        const tagRegex = /<([a-z][\w-]*)\s*([^>]*?)>/gi;
+        let tagMatch: RegExpExecArray | null;
+
+        while ((tagMatch = tagRegex.exec(templateText))) {
+          const tagName = tagMatch[1].toLowerCase();
+          const attrsChunk = tagMatch[2];
+          const tagStartInTemplate = tagMatch.index;
+          const attrsStartInTemplate = tagStartInTemplate + tagMatch[0].indexOf(attrsChunk);
+
+          // Match @event-name= patterns
+          const eventRegex = /@([a-zA-Z][\w-]*)\s*=/g;
+          let eventMatch: RegExpExecArray | null;
+
+          while ((eventMatch = eventRegex.exec(attrsChunk))) {
+            const eventName = eventMatch[1];
+            const eventStartInAttrs = eventMatch.index + 1; // +1 for @
+            const eventStartInFile = templateStart + attrsStartInTemplate + eventStartInAttrs;
+            const eventEndInFile = eventStartInFile + eventName.length;
+
+            if (position >= eventStartInFile && position <= eventEndInFile) {
+              result = {
+                tagName,
+                eventName,
+                start: eventStartInFile,
+                end: eventEndInFile,
+              };
+              return;
+            }
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  ts.forEachChild(sf, visit);
+  return result;
+}
+
 /** Find a property or attribute at the given position within a template literal */
 function findPropertyAtPosition(ts: TS, sf: ts.SourceFile, position: number): PropertyAtPosition | null {
   let result: PropertyAtPosition | null = null;
@@ -304,6 +367,35 @@ function resolveSymbolToDeclaration(ts: TS, checker: ts.TypeChecker, expr: ts.Ex
   return declarations[0];
 }
 
+/** Find CustomEvent dispatch for a given event name in a class */
+function findCustomEventInClass(ts: TS, classDecl: ts.Declaration, eventName: string): ts.Node | null {
+  let result: ts.Node | null = null;
+
+  const visit = (node: ts.Node) => {
+    if (result) return;
+
+    // Match: new CustomEvent('event-name', ...) or dispatchEvent(new CustomEvent('event-name', ...))
+    if (ts.isNewExpression(node)) {
+      const expr = node.expression;
+      if (ts.isIdentifier(expr) && expr.text === 'CustomEvent') {
+        const args = node.arguments;
+        if (args && args.length > 0) {
+          const firstArg = args[0];
+          if (ts.isStringLiteral(firstArg) && firstArg.text === eventName) {
+            result = node;
+            return;
+          }
+        }
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  ts.forEachChild(classDecl, visit);
+  return result;
+}
+
 function init(modules: { typescript: TS }) {
   const ts = modules.typescript;
 
@@ -360,7 +452,41 @@ function init(modules: { typescript: TS }) {
 
       const scopedMap = readScopedElementsMap(ts, containingClass);
 
-      // First, check if cursor is on a property/attribute
+      // First, check if cursor is on an event listener (@event-name)
+      const eventInfo = findEventAtPosition(ts, sf, position);
+      if (eventInfo) {
+        const componentExpr = scopedMap.get(eventInfo.tagName);
+        if (componentExpr) {
+          // Resolve to actual class declaration
+          const classDecl = resolveSymbolToDeclaration(ts, checker, componentExpr);
+          if (classDecl) {
+            // Find CustomEvent in the component class
+            const eventNode = findCustomEventInClass(ts, classDecl, eventInfo.eventName);
+            if (eventNode) {
+              const eventSf = eventNode.getSourceFile();
+              const definition: ts.DefinitionInfo = {
+                fileName: eventSf.fileName,
+                textSpan: ts.createTextSpan(eventNode.getStart(), eventNode.getWidth()),
+                kind: ts.ScriptElementKind.unknown,
+                name: eventInfo.eventName,
+                containerName: '',
+                containerKind: ts.ScriptElementKind.classElement,
+              };
+
+              const textSpan = ts.createTextSpan(eventInfo.start, eventInfo.end - eventInfo.start);
+              const priorDefs = prior?.definitions ?? [];
+              return {
+                definitions: [...priorDefs, definition],
+                textSpan,
+              };
+            }
+          }
+        }
+        // Event not found in component (might be bubbled), return prior
+        return prior;
+      }
+
+      // Then, check if cursor is on a property/attribute
       const propInfo = findPropertyAtPosition(ts, sf, position);
       if (propInfo) {
         const componentExpr = scopedMap.get(propInfo.tagName);
