@@ -1,3 +1,15 @@
+# [1.3.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.2.0...v1.3.0) (2025-12-10)
+
+
+### Bug Fixes
+
+* standardize CLI output format (file:line:col: level: message) ([132d110](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/132d110ec636604fd9f07712afe88088e926d298))
+
+
+### Features
+
+* add quick info (hover) for properties, attributes, events and tags ([1d82b3e](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/1d82b3e95514148670a2ac4a0073c6ae9a217b65))
+
 # [1.2.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.1.0...v1.2.0) (2025-12-10)
 
 
