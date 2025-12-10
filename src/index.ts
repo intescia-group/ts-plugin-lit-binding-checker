@@ -283,6 +283,27 @@ function findPropertySymbol(type: ts.Type, propName: string): ts.Symbol | null {
   return null;
 }
 
+/** Resolve symbol to its original declaration, following aliases */
+function resolveSymbolToDeclaration(ts: TS, checker: ts.TypeChecker, expr: ts.Expression): ts.Declaration | null {
+  let symbol = checker.getSymbolAtLocation(expr);
+  if (!symbol) return null;
+
+  // Follow alias if needed (e.g., element.default -> actual class)
+  while (symbol.flags & ts.SymbolFlags.Alias) {
+    symbol = checker.getAliasedSymbol(symbol);
+  }
+
+  const declarations = symbol.getDeclarations();
+  if (!declarations?.length) return null;
+
+  // Prefer class declarations
+  for (const decl of declarations) {
+    if (ts.isClassDeclaration(decl)) return decl;
+  }
+
+  return declarations[0];
+}
+
 function init(modules: { typescript: TS }) {
   const ts = modules.typescript;
 
@@ -386,13 +407,10 @@ function init(modules: { typescript: TS }) {
       const componentExpr = scopedMap.get(tagInfo.tagName);
       if (!componentExpr) return prior;
 
-      const symbol = checker.getSymbolAtLocation(componentExpr);
-      if (!symbol) return prior;
+      // Resolve to actual class declaration (follows aliases/imports)
+      const decl = resolveSymbolToDeclaration(ts, checker, componentExpr);
+      if (!decl) return prior;
 
-      const declarations = symbol.getDeclarations();
-      if (!declarations?.length) return prior;
-
-      const decl = declarations[0];
       const declSf = decl.getSourceFile();
 
       const definition: ts.DefinitionInfo = {
