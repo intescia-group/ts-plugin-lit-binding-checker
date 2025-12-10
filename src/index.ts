@@ -556,6 +556,141 @@ function init(modules: { typescript: TS }) {
       };
     };
 
+    proxy.getQuickInfoAtPosition = (fileName: string, position: number): ts.QuickInfo | undefined => {
+      const prior = oldLS.getQuickInfoAtPosition(fileName, position);
+      const program = oldLS.getProgram?.();
+      if (!program) return prior;
+
+      const normalizedFileName = fileName.replace(/\\/g, '/');
+      const sf = program.getSourceFile(fileName) ?? program.getSourceFile(normalizedFileName);
+      if (!sf) return prior;
+
+      const checker = program.getTypeChecker();
+      const containingClass = findContainingLitClass(ts, sf, position, checker);
+      if (!containingClass) return prior;
+
+      const scopedMap = readScopedElementsMap(ts, containingClass);
+
+      // Check if cursor is on a property/attribute
+      const propInfo = findPropertyAtPosition(ts, sf, position);
+      if (propInfo) {
+        const componentExpr = scopedMap.get(propInfo.tagName);
+        if (!componentExpr) return prior;
+
+        const componentType = getInstanceTypeFromExpr(checker, componentExpr);
+        if (!componentType) return prior;
+
+        const propSymbol = findPropertySymbol(componentType, propInfo.propName);
+        if (!propSymbol) return prior;
+
+        const propType = checker.getTypeOfSymbolAtLocation(propSymbol, componentExpr);
+        const typeString = checker.typeToString(propType);
+        const propDecl = propSymbol.getDeclarations()?.[0];
+        
+        // Get JSDoc comment if available
+        const jsdoc = ts.displayPartsToString(propSymbol.getDocumentationComment(checker));
+        
+        const displayParts: ts.SymbolDisplayPart[] = [
+          { kind: 'punctuation', text: '(' },
+          { kind: 'text', text: propInfo.isPropertyBinding ? 'property' : 'attribute' },
+          { kind: 'punctuation', text: ')' },
+          { kind: 'space', text: ' ' },
+          { kind: 'propertyName', text: propSymbol.getName() },
+          { kind: 'punctuation', text: ':' },
+          { kind: 'space', text: ' ' },
+          { kind: 'keyword', text: typeString },
+        ];
+
+        const documentation: ts.SymbolDisplayPart[] = jsdoc
+          ? [{ kind: 'text', text: jsdoc }]
+          : [];
+
+        return {
+          kind: ts.ScriptElementKind.memberVariableElement,
+          kindModifiers: '',
+          textSpan: ts.createTextSpan(propInfo.start, propInfo.end - propInfo.start),
+          displayParts,
+          documentation,
+        };
+      }
+
+      // Check if cursor is on an event
+      const eventInfo = findEventAtPosition(ts, sf, position);
+      if (eventInfo) {
+        const componentExpr = scopedMap.get(eventInfo.tagName);
+        if (componentExpr) {
+          const classDecl = resolveSymbolToDeclaration(ts, checker, componentExpr);
+          if (classDecl) {
+            const eventNode = findCustomEventInClass(ts, classDecl, eventInfo.eventName);
+            if (eventNode && ts.isNewExpression(eventNode)) {
+              // Try to get the detail type from CustomEvent<DetailType>
+              let detailType = 'unknown';
+              const typeArgs = eventNode.typeArguments;
+              if (typeArgs && typeArgs.length > 0) {
+                detailType = typeArgs[0].getText();
+              }
+
+              const displayParts: ts.SymbolDisplayPart[] = [
+                { kind: 'punctuation', text: '(' },
+                { kind: 'text', text: 'event' },
+                { kind: 'punctuation', text: ')' },
+                { kind: 'space', text: ' ' },
+                { kind: 'propertyName', text: eventInfo.eventName },
+                { kind: 'punctuation', text: ':' },
+                { kind: 'space', text: ' ' },
+                { kind: 'keyword', text: `CustomEvent<${detailType}>` },
+              ];
+
+              return {
+                kind: ts.ScriptElementKind.unknown,
+                kindModifiers: '',
+                textSpan: ts.createTextSpan(eventInfo.start, eventInfo.end - eventInfo.start),
+                displayParts,
+                documentation: [],
+              };
+            }
+          }
+        }
+      }
+
+      // Check if cursor is on a tag name
+      const tagInfo = findTagAtPosition(ts, sf, position);
+      if (tagInfo) {
+        const componentExpr = scopedMap.get(tagInfo.tagName);
+        if (componentExpr) {
+          const classDecl = resolveSymbolToDeclaration(ts, checker, componentExpr);
+          if (classDecl && ts.isClassDeclaration(classDecl)) {
+            const className = classDecl.name?.getText() ?? tagInfo.tagName;
+            const jsdoc = classDecl.name 
+              ? ts.displayPartsToString(checker.getSymbolAtLocation(classDecl.name)?.getDocumentationComment(checker) ?? [])
+              : '';
+
+            const displayParts: ts.SymbolDisplayPart[] = [
+              { kind: 'punctuation', text: '(' },
+              { kind: 'text', text: 'custom element' },
+              { kind: 'punctuation', text: ')' },
+              { kind: 'space', text: ' ' },
+              { kind: 'className', text: className },
+            ];
+
+            const documentation: ts.SymbolDisplayPart[] = jsdoc
+              ? [{ kind: 'text', text: jsdoc }]
+              : [];
+
+            return {
+              kind: ts.ScriptElementKind.classElement,
+              kindModifiers: '',
+              textSpan: ts.createTextSpan(tagInfo.start, tagInfo.end - tagInfo.start),
+              displayParts,
+              documentation,
+            };
+          }
+        }
+      }
+
+      return prior;
+    };
+
     return proxy;
   }
 
