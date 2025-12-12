@@ -1,3 +1,10 @@
+## [1.3.1](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.3.0...v1.3.1) (2025-12-12)
+
+
+### Bug Fixes
+
+* improve property detection in HTML templates ([3029b1f](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/3029b1f5f79dd3672e22dc7f9ddfea1a5238945a))
+
 # [1.3.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.2.0...v1.3.0) (2025-12-10)
 
 
