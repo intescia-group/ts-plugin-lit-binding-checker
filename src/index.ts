@@ -96,18 +96,20 @@ function findPropertyAtPosition(ts: TS, sf: ts.SourceFile, position: number): Pr
         const templateText = template.getText();
         const templateStart = template.getStart();
 
-        // Track current tag context
-        let currentTag: string | null = null;
+        // Mask ${...} expressions to avoid matching > inside them (e.g., Array<T>)
+        const maskedText = templateText.replace(/\$\{[^}]*\}/g, (m) => '§'.repeat(m.length));
         
         // Find all tags and their attributes/properties
         const tagRegex = /<([a-z][\w-]*)\s*([^>]*?)>/gi;
         let tagMatch: RegExpExecArray | null;
 
-        while ((tagMatch = tagRegex.exec(templateText))) {
+        while ((tagMatch = tagRegex.exec(maskedText))) {
           const tagName = tagMatch[1].toLowerCase();
-          const attrsChunk = tagMatch[2];
-          const tagStartInTemplate = tagMatch.index;
-          const attrsStartInTemplate = tagStartInTemplate + tagMatch[0].indexOf(attrsChunk);
+          const attrsStartInTemplate = tagMatch.index + tagMatch[0].indexOf(tagMatch[2]);
+          const attrsEndInTemplate = attrsStartInTemplate + tagMatch[2].length;
+          
+          // Get the actual (unmasked) attributes chunk from original text
+          const attrsChunk = templateText.slice(attrsStartInTemplate, attrsEndInTemplate);
 
           // Match .prop= or attr= patterns
           const propAttrRegex = /(\.|\?|@)?([a-zA-Z][\w-]*)\s*=/g;

@@ -317,28 +317,56 @@ function forAllNonUndefinedConstituentsAssignableTo(
     const results: Array<{ tag: string; prop: string; expr: ts.Expression }> = [];
     if (!ts.isTemplateExpression(tagged.template)) return results;
 
-    let currentTag: string | null = null;
-    const updateTagFromText = (text: string) => {
-      const m = /<([\da-z-]+)([^>]*)$/i.exec(text);
-      if (m) currentTag = m[1].toLowerCase();
+    // Build full accumulated text to properly track tag context
+    let accumulatedText = tagged.template.head.text;
+    
+    const findCurrentTag = (text: string): string | null => {
+      // Find the last opened tag that hasn't been closed
+      // We need to track all tags and their open/close status
+      let lastOpenTag: string | null = null;
+      const tagOpenRe = /<([\da-z-]+)\b/gi;
+      const tagCloseRe = /<\/([\da-z-]+)\s*>|\/>/g;
+      
+      // Find all tag openings
+      const openings: Array<{ tag: string; index: number }> = [];
+      let m: RegExpExecArray | null;
+      while ((m = tagOpenRe.exec(text))) {
+        openings.push({ tag: m[1].toLowerCase(), index: m.index });
+      }
+      
+      // Find the last tag opening that we're still inside of
+      // We're inside a tag if we found '<tagname' but not the closing '>'
+      for (let i = openings.length - 1; i >= 0; i--) {
+        const opening = openings[i];
+        const afterTag = text.slice(opening.index);
+        // Check if this tag is still open (no '>' after the tag name yet, or we're in attributes)
+        const closeIdx = afterTag.indexOf('>');
+        if (closeIdx === -1) {
+          // Tag is not closed yet, we're inside its attributes
+          lastOpenTag = opening.tag;
+          break;
+        }
+      }
+      
+      return lastOpenTag;
     };
+    
     const findPropLeft = (text: string): string | null => {
       const m = /\.(\w+)\s*=\s*$/.exec(text);
       return m ? m[1] : null;
     };
 
-    const headText = tagged.template.head.text;
-    updateTagFromText(headText);
-    let leftTail = headText;
-
     for (const span of tagged.template.templateSpans) {
       const expr = span.expression;
-      const leftText = leftTail;
-      const prop = findPropLeft(leftText);
-      if (currentTag && prop) results.push({ tag: currentTag, prop, expr });
-      const lit = span.literal.text;
-      updateTagFromText(`${leftText}\${...}${lit}`);
-      leftTail = lit;
+      const prop = findPropLeft(accumulatedText);
+      const currentTag = findCurrentTag(accumulatedText);
+      
+      if (currentTag && prop) {
+        results.push({ tag: currentTag, prop, expr });
+      }
+      
+      // Add placeholder for expression and the literal text after it
+      accumulatedText += '${...}' + span.literal.text;
     }
     return results;
   }
