@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.3.1...v1.4.0) (2025-12-15)
+
+
+### Features
+
+* **events:** improve CustomEvent hover info with detail type inference ([8b3cceb](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/8b3cceb4100d3efa5bb93be493ed6909680aed3b))
+
 ## [1.3.1](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.3.0...v1.3.1) (2025-12-12)
 
 
