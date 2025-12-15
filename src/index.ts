@@ -40,14 +40,19 @@ function findEventAtPosition(ts: TS, sf: ts.SourceFile, position: number): Event
         const templateText = template.getText();
         const templateStart = template.getStart();
 
+        // Mask ${...} expressions to avoid matching > inside them
+        const maskedText = templateText.replace(/\$\{[^}]*\}/g, (m) => '§'.repeat(m.length));
+
         const tagRegex = /<([a-z][\w-]*)\s*([^>]*?)>/gi;
         let tagMatch: RegExpExecArray | null;
 
-        while ((tagMatch = tagRegex.exec(templateText))) {
+        while ((tagMatch = tagRegex.exec(maskedText))) {
           const tagName = tagMatch[1].toLowerCase();
-          const attrsChunk = tagMatch[2];
-          const tagStartInTemplate = tagMatch.index;
-          const attrsStartInTemplate = tagStartInTemplate + tagMatch[0].indexOf(attrsChunk);
+          const attrsStartInTemplate = tagMatch.index + tagMatch[0].indexOf(tagMatch[2]);
+          const attrsEndInTemplate = attrsStartInTemplate + tagMatch[2].length;
+
+          // Get the actual (unmasked) attributes chunk from original text
+          const attrsChunk = templateText.slice(attrsStartInTemplate, attrsEndInTemplate);
 
           // Match @event-name= patterns
           const eventRegex = /@([a-zA-Z][\w-]*)\s*=/g;
@@ -111,8 +116,8 @@ function findPropertyAtPosition(ts: TS, sf: ts.SourceFile, position: number): Pr
           // Get the actual (unmasked) attributes chunk from original text
           const attrsChunk = templateText.slice(attrsStartInTemplate, attrsEndInTemplate);
 
-          // Match .prop= or attr= patterns
-          const propAttrRegex = /(\.|\?|@)?([a-zA-Z][\w-]*)\s*=/g;
+          // Match .prop= or ?attr= or attr= patterns (but NOT @event=)
+          const propAttrRegex = /(\.|\?)?([a-zA-Z][\w-]*)\s*=/g;
           let propMatch: RegExpExecArray | null;
 
           while ((propMatch = propAttrRegex.exec(attrsChunk))) {
@@ -369,12 +374,23 @@ function resolveSymbolToDeclaration(ts: TS, checker: ts.TypeChecker, expr: ts.Ex
   return declarations[0];
 }
 
-/** Find CustomEvent dispatch for a given event name in a class */
-function findCustomEventInClass(ts: TS, classDecl: ts.Declaration, eventName: string): ts.Node | null {
-  let result: ts.Node | null = null;
+interface CustomEventResult {
+  node: ts.NewExpression;
+  containingMethod: ts.MethodDeclaration | null;
+}
 
-  const visit = (node: ts.Node) => {
+/** Find CustomEvent dispatch for a given event name in a class */
+function findCustomEventInClass(ts: TS, classDecl: ts.Declaration, eventName: string, checker: ts.TypeChecker): CustomEventResult | null {
+  let result: CustomEventResult | null = null;
+
+  const visit = (node: ts.Node, currentMethod: ts.MethodDeclaration | null) => {
     if (result) return;
+
+    // Track method context
+    if (ts.isMethodDeclaration(node)) {
+      ts.forEachChild(node, child => visit(child, node));
+      return;
+    }
 
     // Match: new CustomEvent('event-name', ...) or dispatchEvent(new CustomEvent('event-name', ...))
     if (ts.isNewExpression(node)) {
@@ -384,17 +400,17 @@ function findCustomEventInClass(ts: TS, classDecl: ts.Declaration, eventName: st
         if (args && args.length > 0) {
           const firstArg = args[0];
           if (ts.isStringLiteral(firstArg) && firstArg.text === eventName) {
-            result = node;
+            result = { node, containingMethod: currentMethod };
             return;
           }
         }
       }
     }
 
-    ts.forEachChild(node, visit);
+    ts.forEachChild(node, child => visit(child, currentMethod));
   };
 
-  ts.forEachChild(classDecl, visit);
+  ts.forEachChild(classDecl, child => visit(child, null));
   return result;
 }
 
@@ -463,12 +479,12 @@ function init(modules: { typescript: TS }) {
           const classDecl = resolveSymbolToDeclaration(ts, checker, componentExpr);
           if (classDecl) {
             // Find CustomEvent in the component class
-            const eventNode = findCustomEventInClass(ts, classDecl, eventInfo.eventName);
-            if (eventNode) {
-              const eventSf = eventNode.getSourceFile();
+            const eventResult = findCustomEventInClass(ts, classDecl, eventInfo.eventName, checker);
+            if (eventResult) {
+              const eventSf = eventResult.node.getSourceFile();
               const definition: ts.DefinitionInfo = {
                 fileName: eventSf.fileName,
-                textSpan: ts.createTextSpan(eventNode.getStart(), eventNode.getWidth()),
+                textSpan: ts.createTextSpan(eventResult.node.getStart(), eventResult.node.getWidth()),
                 kind: ts.ScriptElementKind.unknown,
                 name: eventInfo.eventName,
                 containerName: '',
@@ -573,7 +589,99 @@ function init(modules: { typescript: TS }) {
 
       const scopedMap = readScopedElementsMap(ts, containingClass);
 
-      // Check if cursor is on a property/attribute
+      // First, check if cursor is on an event listener (@event-name)
+      const eventInfo = findEventAtPosition(ts, sf, position);
+      if (eventInfo) {
+        const componentExpr = scopedMap.get(eventInfo.tagName);
+        if (componentExpr) {
+          const classDecl = resolveSymbolToDeclaration(ts, checker, componentExpr);
+          if (classDecl) {
+            const eventResult = findCustomEventInClass(ts, classDecl, eventInfo.eventName, checker);
+            
+            // Get the detail type using the TypeChecker for proper resolution
+            let detailType = 'unknown';
+            if (eventResult && eventResult.node && ts.isNewExpression(eventResult.node)) {
+              const typeArgs = eventResult.node.typeArguments;
+              if (typeArgs && typeArgs.length > 0) {
+                // Explicit type argument: new CustomEvent<DetailType>(...)
+                const typeNode = typeArgs[0];
+                const resolvedType = checker.getTypeFromTypeNode(typeNode);
+                detailType = checker.typeToString(resolvedType);
+              } else {
+                // No explicit type, try to infer from the options.detail
+                // new CustomEvent('name', { detail: { ... } })
+                const args = eventResult.node.arguments;
+                if (args && args.length > 1) {
+                  const optionsArg = args[1];
+                  if (ts.isObjectLiteralExpression(optionsArg)) {
+                    const detailProp = optionsArg.properties.find(
+                      p => ts.isPropertyAssignment(p) && 
+                           ts.isIdentifier(p.name) && 
+                           p.name.text === 'detail'
+                    ) as ts.PropertyAssignment | undefined;
+                    
+                    if (detailProp) {
+                      const detailExprType = checker.getTypeAtLocation(detailProp.initializer);
+                      detailType = checker.typeToString(detailExprType);
+                    }
+                  }
+                }
+              }
+            }
+
+            // Get JSDoc from the containing method if available
+            let jsdoc = '';
+            if (eventResult?.containingMethod) {
+              const methodSymbol = checker.getSymbolAtLocation(eventResult.containingMethod.name!);
+              if (methodSymbol) {
+                jsdoc = ts.displayPartsToString(methodSymbol.getDocumentationComment(checker));
+              }
+            }
+
+            const displayParts: ts.SymbolDisplayPart[] = [
+              { kind: 'punctuation', text: '(' },
+              { kind: 'text', text: 'event' },
+              { kind: 'punctuation', text: ')' },
+              { kind: 'space', text: ' ' },
+              { kind: 'propertyName', text: eventInfo.eventName },
+              { kind: 'punctuation', text: ':' },
+              { kind: 'space', text: ' ' },
+              { kind: 'keyword', text: `CustomEvent<${detailType}>` },
+            ];
+
+            const documentation: ts.SymbolDisplayPart[] = jsdoc
+              ? [{ kind: 'text', text: jsdoc }]
+              : [];
+
+            return {
+              kind: ts.ScriptElementKind.unknown,
+              kindModifiers: '',
+              textSpan: ts.createTextSpan(eventInfo.start, eventInfo.end - eventInfo.start),
+              displayParts,
+              documentation,
+            };
+          }
+        }
+        
+        // Event detected but component not in scopedElements - still show basic info
+        const displayParts: ts.SymbolDisplayPart[] = [
+          { kind: 'punctuation', text: '(' },
+          { kind: 'text', text: 'event' },
+          { kind: 'punctuation', text: ')' },
+          { kind: 'space', text: ' ' },
+          { kind: 'propertyName', text: eventInfo.eventName },
+        ];
+
+        return {
+          kind: ts.ScriptElementKind.unknown,
+          kindModifiers: '',
+          textSpan: ts.createTextSpan(eventInfo.start, eventInfo.end - eventInfo.start),
+          displayParts,
+          documentation: [],
+        };
+      }
+
+      // Then, check if cursor is on a property/attribute
       const propInfo = findPropertyAtPosition(ts, sf, position);
       if (propInfo) {
         const componentExpr = scopedMap.get(propInfo.tagName);
@@ -614,45 +722,6 @@ function init(modules: { typescript: TS }) {
           displayParts,
           documentation,
         };
-      }
-
-      // Check if cursor is on an event
-      const eventInfo = findEventAtPosition(ts, sf, position);
-      if (eventInfo) {
-        const componentExpr = scopedMap.get(eventInfo.tagName);
-        if (componentExpr) {
-          const classDecl = resolveSymbolToDeclaration(ts, checker, componentExpr);
-          if (classDecl) {
-            const eventNode = findCustomEventInClass(ts, classDecl, eventInfo.eventName);
-            if (eventNode && ts.isNewExpression(eventNode)) {
-              // Try to get the detail type from CustomEvent<DetailType>
-              let detailType = 'unknown';
-              const typeArgs = eventNode.typeArguments;
-              if (typeArgs && typeArgs.length > 0) {
-                detailType = typeArgs[0].getText();
-              }
-
-              const displayParts: ts.SymbolDisplayPart[] = [
-                { kind: 'punctuation', text: '(' },
-                { kind: 'text', text: 'event' },
-                { kind: 'punctuation', text: ')' },
-                { kind: 'space', text: ' ' },
-                { kind: 'propertyName', text: eventInfo.eventName },
-                { kind: 'punctuation', text: ':' },
-                { kind: 'space', text: ' ' },
-                { kind: 'keyword', text: `CustomEvent<${detailType}>` },
-              ];
-
-              return {
-                kind: ts.ScriptElementKind.unknown,
-                kindModifiers: '',
-                textSpan: ts.createTextSpan(eventInfo.start, eventInfo.end - eventInfo.start),
-                displayParts,
-                documentation: [],
-              };
-            }
-          }
-        }
       }
 
       // Check if cursor is on a tag name

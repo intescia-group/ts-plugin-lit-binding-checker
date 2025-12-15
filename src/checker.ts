@@ -371,6 +371,84 @@ function forAllNonUndefinedConstituentsAssignableTo(
     return results;
   }
 
+  /** Collect @event bindings from a tagged template expression */
+  function collectEventBindingsFromTemplate(tagged: ts.TaggedTemplateExpression)
+  : Array<{ tag: string; eventName: string; expr: ts.Expression }> {
+    const results: Array<{ tag: string; eventName: string; expr: ts.Expression }> = [];
+    if (!ts.isTemplateExpression(tagged.template)) return results;
+
+    let accumulatedText = tagged.template.head.text;
+    
+    const findCurrentTag = (text: string): string | null => {
+      let lastOpenTag: string | null = null;
+      const tagOpenRe = /<([\da-z-]+)\b/gi;
+      
+      const openings: Array<{ tag: string; index: number }> = [];
+      let m: RegExpExecArray | null;
+      while ((m = tagOpenRe.exec(text))) {
+        openings.push({ tag: m[1].toLowerCase(), index: m.index });
+      }
+      
+      for (let i = openings.length - 1; i >= 0; i--) {
+        const opening = openings[i];
+        const afterTag = text.slice(opening.index);
+        const closeIdx = afterTag.indexOf('>');
+        if (closeIdx === -1) {
+          lastOpenTag = opening.tag;
+          break;
+        }
+      }
+      
+      return lastOpenTag;
+    };
+    
+    const findEventLeft = (text: string): string | null => {
+      const m = /@([\w-]+)\s*=\s*$/.exec(text);
+      return m ? m[1] : null;
+    };
+
+    for (const span of tagged.template.templateSpans) {
+      const expr = span.expression;
+      const eventName = findEventLeft(accumulatedText);
+      const currentTag = findCurrentTag(accumulatedText);
+      
+      if (currentTag && eventName) {
+        results.push({ tag: currentTag, eventName, expr });
+      }
+      
+      accumulatedText += '${...}' + span.literal.text;
+    }
+    return results;
+  }
+
+  /** Find CustomEvent dispatch for a given event name in a class declaration */
+  function findCustomEventInClass(classDecl: ts.Node, eventName: string): ts.NewExpression | null {
+    let result: ts.NewExpression | null = null;
+
+    const visit = (node: ts.Node) => {
+      if (result) return;
+
+      if (ts.isNewExpression(node)) {
+        const expr = node.expression;
+        if (ts.isIdentifier(expr) && expr.text === 'CustomEvent') {
+          const args = node.arguments;
+          if (args && args.length > 0) {
+            const firstArg = args[0];
+            if (ts.isStringLiteral(firstArg) && firstArg.text === eventName) {
+              result = node;
+              return;
+            }
+          }
+        }
+      }
+
+      ts.forEachChild(node, visit);
+    };
+
+    ts.forEachChild(classDecl, visit);
+    return result;
+  }
+
   interface StaticAttr { tag: string; attr: string; booleanish: boolean; indexInText: number; }
   function isGlobalAttr(attr: string) {
     if (GLOBAL_ATTR_ALLOWLIST.has(attr)) return true;
@@ -540,6 +618,80 @@ function forAllNonUndefinedConstituentsAssignableTo(
                   start: pos, length: sa.attr.length
                 });
               }
+            }
+          }
+
+          // 3) @event bindings - validate handler types
+          for (const ev of collectEventBindingsFromTemplate(n)) {
+            if (isNativeTag(ev.tag)) continue;
+
+            const elemExpr = scopedMap.get(ev.tag);
+            if (!elemExpr) continue; // Already reported in prop bindings
+
+            // Resolve the component class to find the CustomEvent dispatch
+            let componentClassDecl: ts.Node | null = null;
+            let symbol = checker.getSymbolAtLocation(elemExpr);
+            if (symbol) {
+              while (symbol.flags & ts.SymbolFlags.Alias) {
+                symbol = checker.getAliasedSymbol(symbol);
+              }
+              const declarations = symbol.getDeclarations();
+              if (declarations?.length) {
+                for (const decl of declarations) {
+                  if (ts.isClassDeclaration(decl)) {
+                    componentClassDecl = decl;
+                    break;
+                  }
+                }
+                if (!componentClassDecl) componentClassDecl = declarations[0];
+              }
+            }
+
+            if (!componentClassDecl) continue;
+
+            // Find the CustomEvent dispatch in the component
+            const customEventNode = findCustomEventInClass(componentClassDecl, ev.eventName);
+            if (!customEventNode) continue; // Event not found, might be bubbled from child
+
+            // Get the handler type
+            const handlerType = checker.getTypeAtLocation(ev.expr);
+            
+            // Get the CustomEvent type from the dispatch
+            const eventType = checker.getTypeAtLocation(customEventNode);
+            
+            // The handler should accept a function that takes the event type as parameter
+            // Check if handler is a function/method
+            const handlerSignatures = handlerType.getCallSignatures();
+            if (handlerSignatures.length === 0) {
+              // Not a callable, skip
+              continue;
+            }
+
+            // Get the first parameter type of the handler
+            const handlerSig = handlerSignatures[0];
+            const handlerParams = handlerSig.getParameters();
+            
+            if (handlerParams.length === 0) {
+              // Handler takes no parameters, that's fine (ignores the event)
+              continue;
+            }
+
+            const firstParamSymbol = handlerParams[0];
+            const firstParamType = checker.getTypeOfSymbolAtLocation(firstParamSymbol, ev.expr);
+            
+            // Check if eventType is assignable to firstParamType
+            // The event passed to the handler should be assignable to what the handler expects
+            if (!checker.isTypeAssignableTo(eventType, firstParamType)) {
+              const expectedType = typeToString(firstParamType);
+              const gotType = typeToString(eventType);
+              diags.push({
+                file: sf,
+                category: ts.DiagnosticCategory.Error,
+                code: 90030,
+                messageText: `${clsName} → <${ev.tag}> @${ev.eventName} handler type mismatch. Handler expects: ${expectedType}, event dispatches: ${gotType}`,
+                start: ev.expr.getStart(),
+                length: ev.expr.getWidth()
+              });
             }
           }
         }
