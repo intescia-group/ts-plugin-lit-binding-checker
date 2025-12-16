@@ -375,8 +375,72 @@ function resolveSymbolToDeclaration(ts: TS, checker: ts.TypeChecker, expr: ts.Ex
 }
 
 interface CustomEventResult {
-  node: ts.NewExpression;
+  node: ts.NewExpression | null;
   containingMethod: ts.MethodDeclaration | null;
+  detailType: string | null; // From JSDoc or inferred
+  fromJsDoc: boolean;
+  jsDocNode: ts.Node | null; // The node containing the @fires JSDoc
+}
+
+interface JsDocEventInfo {
+  detailType: string | null;
+  node: ts.Node;
+}
+
+/** Parse @fires JSDoc tags from a class to find event declarations */
+function findEventFromJsDoc(ts: TS, classDecl: ts.Declaration, eventName: string): JsDocEventInfo | null {
+  // Check JSDoc on a node
+  const checkJsDoc = (node: ts.Node): JsDocEventInfo | null => {
+    const jsDocs = (node as any).jsDoc as ts.JSDoc[] | undefined;
+    if (jsDocs) {
+      for (const jsDoc of jsDocs) {
+        if (jsDoc.tags) {
+          for (const tag of jsDoc.tags) {
+            // Match @fires or @event tags
+            if (tag.tagName.text === 'fires' || tag.tagName.text === 'event') {
+              let comment: string | undefined;
+              if (typeof tag.comment === 'string') {
+                comment = tag.comment;
+              } else if (Array.isArray(tag.comment)) {
+                comment = tag.comment.map((c: any) => c.text || '').join('');
+              } else if (tag.comment) {
+                comment = String(tag.comment);
+              }
+              
+              // Parse: "event-name" or "event-name - description" or "event-name - Emitted with `{ type: T }` ..."
+              const parts = comment?.split(/\s+-\s+|\s+/) || [];
+              const tagEventName = parts[0]?.trim();
+              
+              if (tagEventName === eventName) {
+                // Try to extract type from comment like "Emitted with `{ value: string }`"
+                let detailType: string | null = null;
+                const typeMatch = comment?.match(/`([^`]+)`/);
+                if (typeMatch) {
+                  detailType = typeMatch[1];
+                }
+                return { detailType, node };
+              }
+            }
+          }
+        }
+      }
+    }
+    return null;
+  };
+
+  // Check class-level JSDoc
+  const classResult = checkJsDoc(classDecl);
+  if (classResult) return classResult;
+
+  // Check JSDoc on all methods/properties
+  if (ts.isClassDeclaration(classDecl)) {
+    for (const member of classDecl.members) {
+      const memberResult = checkJsDoc(member);
+      if (memberResult) return memberResult;
+    }
+  }
+
+  return null;
 }
 
 /** Find CustomEvent dispatch for a given event name in a class */
@@ -400,7 +464,7 @@ function findCustomEventInClass(ts: TS, classDecl: ts.Declaration, eventName: st
         if (args && args.length > 0) {
           const firstArg = args[0];
           if (ts.isStringLiteral(firstArg) && firstArg.text === eventName) {
-            result = { node, containingMethod: currentMethod };
+            result = { node, containingMethod: currentMethod, detailType: null, fromJsDoc: false, jsDocNode: null };
             return;
           }
         }
@@ -411,6 +475,15 @@ function findCustomEventInClass(ts: TS, classDecl: ts.Declaration, eventName: st
   };
 
   ts.forEachChild(classDecl, child => visit(child, null));
+  
+  // If not found via code, try JSDoc
+  if (!result) {
+    const jsDocResult = findEventFromJsDoc(ts, classDecl, eventName);
+    if (jsDocResult) {
+      result = { node: null, containingMethod: null, detailType: jsDocResult.detailType, fromJsDoc: true, jsDocNode: jsDocResult.node };
+    }
+  }
+  
   return result;
 }
 
@@ -480,12 +553,31 @@ function init(modules: { typescript: TS }) {
           if (classDecl) {
             // Find CustomEvent in the component class
             const eventResult = findCustomEventInClass(ts, classDecl, eventInfo.eventName, checker);
-            if (eventResult) {
+            if (eventResult && eventResult.node) {
               const eventSf = eventResult.node.getSourceFile();
               const definition: ts.DefinitionInfo = {
                 fileName: eventSf.fileName,
                 textSpan: ts.createTextSpan(eventResult.node.getStart(), eventResult.node.getWidth()),
                 kind: ts.ScriptElementKind.unknown,
+                name: eventInfo.eventName,
+                containerName: '',
+                containerKind: ts.ScriptElementKind.classElement,
+              };
+
+              const textSpan = ts.createTextSpan(eventInfo.start, eventInfo.end - eventInfo.start);
+              const priorDefs = prior?.definitions ?? [];
+              return {
+                definitions: [...priorDefs, definition],
+                textSpan,
+              };
+            }
+            // Event found via JSDoc - go to the member containing the @fires tag
+            if (eventResult && eventResult.fromJsDoc && eventResult.jsDocNode) {
+              const jsDocNodeSf = eventResult.jsDocNode.getSourceFile();
+              const definition: ts.DefinitionInfo = {
+                fileName: jsDocNodeSf.fileName,
+                textSpan: ts.createTextSpan(eventResult.jsDocNode.getStart(), eventResult.jsDocNode.getWidth()),
+                kind: ts.ScriptElementKind.memberFunctionElement,
                 name: eventInfo.eventName,
                 containerName: '',
                 containerKind: ts.ScriptElementKind.classElement,
@@ -600,32 +692,37 @@ function init(modules: { typescript: TS }) {
             
             // Get the detail type using the TypeChecker for proper resolution
             let detailType = 'unknown';
-            if (eventResult && eventResult.node && ts.isNewExpression(eventResult.node)) {
-              const typeArgs = eventResult.node.typeArguments;
-              if (typeArgs && typeArgs.length > 0) {
-                // Explicit type argument: new CustomEvent<DetailType>(...)
-                const typeNode = typeArgs[0];
-                const resolvedType = checker.getTypeFromTypeNode(typeNode);
-                detailType = checker.typeToString(resolvedType);
-              } else {
-                // No explicit type, try to infer from the options.detail
-                // new CustomEvent('name', { detail: { ... } })
-                const args = eventResult.node.arguments;
-                if (args && args.length > 1) {
-                  const optionsArg = args[1];
-                  if (ts.isObjectLiteralExpression(optionsArg)) {
-                    const detailProp = optionsArg.properties.find(
-                      p => ts.isPropertyAssignment(p) && 
-                           ts.isIdentifier(p.name) && 
-                           p.name.text === 'detail'
-                    ) as ts.PropertyAssignment | undefined;
-                    
-                    if (detailProp) {
-                      const detailExprType = checker.getTypeAtLocation(detailProp.initializer);
-                      detailType = checker.typeToString(detailExprType);
+            if (eventResult) {
+              if (eventResult.node && ts.isNewExpression(eventResult.node)) {
+                const typeArgs = eventResult.node.typeArguments;
+                if (typeArgs && typeArgs.length > 0) {
+                  // Explicit type argument: new CustomEvent<DetailType>(...)
+                  const typeNode = typeArgs[0];
+                  const resolvedType = checker.getTypeFromTypeNode(typeNode);
+                  detailType = checker.typeToString(resolvedType);
+                } else {
+                  // No explicit type, try to infer from the options.detail
+                  // new CustomEvent('name', { detail: { ... } })
+                  const args = eventResult.node.arguments;
+                  if (args && args.length > 1) {
+                    const optionsArg = args[1];
+                    if (ts.isObjectLiteralExpression(optionsArg)) {
+                      const detailProp = optionsArg.properties.find(
+                        p => ts.isPropertyAssignment(p) && 
+                             ts.isIdentifier(p.name) && 
+                             p.name.text === 'detail'
+                      ) as ts.PropertyAssignment | undefined;
+                      
+                      if (detailProp) {
+                        const detailExprType = checker.getTypeAtLocation(detailProp.initializer);
+                        detailType = checker.typeToString(detailExprType);
+                      }
                     }
                   }
                 }
+              } else if (eventResult.fromJsDoc && eventResult.detailType) {
+                // Type from JSDoc @fires tag
+                detailType = eventResult.detailType;
               }
             }
 

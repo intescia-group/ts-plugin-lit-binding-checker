@@ -421,8 +421,63 @@ function forAllNonUndefinedConstituentsAssignableTo(
     return results;
   }
 
-  /** Find CustomEvent dispatch for a given event name in a class declaration */
-  function findCustomEventInClass(classDecl: ts.Node, eventName: string): ts.NewExpression | null {
+  interface EventInfo {
+    node: ts.NewExpression | null;
+    detailType: string | null;
+    fromJsDoc: boolean;
+  }
+
+  /** Parse @fires JSDoc tags from a class to find event declarations */
+  function findEventFromJsDoc(classDecl: ts.Node, eventName: string): { detailType: string | null } | null {
+    const checkJsDoc = (node: ts.Node): { detailType: string | null } | null => {
+      const jsDocs = (node as any).jsDoc as ts.JSDoc[] | undefined;
+      if (jsDocs) {
+        for (const jsDoc of jsDocs) {
+          if (jsDoc.tags) {
+            for (const tag of jsDoc.tags) {
+              if (tag.tagName.text === 'fires' || tag.tagName.text === 'event') {
+                let comment: string | undefined;
+                if (typeof tag.comment === 'string') {
+                  comment = tag.comment;
+                } else if (Array.isArray(tag.comment)) {
+                  comment = tag.comment.map((c: any) => c.text || '').join('');
+                } else if (tag.comment) {
+                  comment = String(tag.comment);
+                }
+                
+                const parts = comment?.split(/\s+-\s+|\s+/) || [];
+                const tagEventName = parts[0]?.trim();
+                
+                if (tagEventName === eventName) {
+                  let detailType: string | null = null;
+                  const typeMatch = comment?.match(/`([^`]+)`/);
+                  if (typeMatch) {
+                    detailType = typeMatch[1];
+                  }
+                  return { detailType };
+                }
+              }
+            }
+          }
+        }
+      }
+      return null;
+    };
+
+    const classResult = checkJsDoc(classDecl);
+    if (classResult) return classResult;
+
+    if (ts.isClassDeclaration(classDecl)) {
+      for (const member of classDecl.members) {
+        const memberResult = checkJsDoc(member);
+        if (memberResult) return memberResult;
+      }
+    }
+
+    return null;
+  }
+
+  function findCustomEventInClass(classDecl: ts.Node, eventName: string): EventInfo | null {
     let result: ts.NewExpression | null = null;
 
     const visit = (node: ts.Node) => {
@@ -446,7 +501,18 @@ function forAllNonUndefinedConstituentsAssignableTo(
     };
 
     ts.forEachChild(classDecl, visit);
-    return result;
+    
+    if (result) {
+      return { node: result, detailType: null, fromJsDoc: false };
+    }
+    
+    // Try JSDoc
+    const jsDocResult = findEventFromJsDoc(classDecl, eventName);
+    if (jsDocResult) {
+      return { node: null, detailType: jsDocResult.detailType, fromJsDoc: true };
+    }
+    
+    return null;
   }
 
   interface StaticAttr { tag: string; attr: string; booleanish: boolean; indexInText: number; }
@@ -649,15 +715,12 @@ function forAllNonUndefinedConstituentsAssignableTo(
 
             if (!componentClassDecl) continue;
 
-            // Find the CustomEvent dispatch in the component
-            const customEventNode = findCustomEventInClass(componentClassDecl, ev.eventName);
-            if (!customEventNode) continue; // Event not found, might be bubbled from child
+            // Find the CustomEvent dispatch in the component (or JSDoc)
+            const eventInfo = findCustomEventInClass(componentClassDecl, ev.eventName);
+            if (!eventInfo) continue; // Event not found, might be bubbled from child
 
             // Get the handler type
             const handlerType = checker.getTypeAtLocation(ev.expr);
-            
-            // Get the CustomEvent type from the dispatch
-            const eventType = checker.getTypeAtLocation(customEventNode);
             
             // The handler should accept a function that takes the event type as parameter
             // Check if handler is a function/method
@@ -679,11 +742,39 @@ function forAllNonUndefinedConstituentsAssignableTo(
             const firstParamSymbol = handlerParams[0];
             const firstParamType = checker.getTypeOfSymbolAtLocation(firstParamSymbol, ev.expr);
             
+            let eventType: ts.Type | null = null;
+            let eventTypeStr: string;
+            
+            if (eventInfo.node) {
+              // Get the CustomEvent type from the dispatch
+              eventType = checker.getTypeAtLocation(eventInfo.node);
+              eventTypeStr = typeToString(eventType);
+            } else if (eventInfo.fromJsDoc && eventInfo.detailType) {
+              // Type from JSDoc - we can't fully type-check but we can show the expected type
+              eventTypeStr = `CustomEvent<${eventInfo.detailType}>`;
+              // For JSDoc types, we do a string-based comparison since we can't create a real type
+              const handlerTypeStr = typeToString(firstParamType);
+              // Check if handler expects CustomEvent with compatible detail
+              if (!handlerTypeStr.includes('CustomEvent') && !handlerTypeStr.includes('Event')) {
+                diags.push({
+                  file: sf,
+                  category: ts.DiagnosticCategory.Error,
+                  code: 90030,
+                  messageText: `${clsName} → <${ev.tag}> @${ev.eventName} handler type mismatch. Handler expects: ${handlerTypeStr}, event dispatches: ${eventTypeStr}`,
+                  start: ev.expr.getStart(),
+                  length: ev.expr.getWidth()
+                });
+              }
+              continue;
+            } else {
+              continue;
+            }
+            
             // Check if eventType is assignable to firstParamType
             // The event passed to the handler should be assignable to what the handler expects
-            if (!checker.isTypeAssignableTo(eventType, firstParamType)) {
+            if (eventType && !checker.isTypeAssignableTo(eventType, firstParamType)) {
               const expectedType = typeToString(firstParamType);
-              const gotType = typeToString(eventType);
+              const gotType = eventTypeStr;
               diags.push({
                 file: sf,
                 category: ts.DiagnosticCategory.Error,
