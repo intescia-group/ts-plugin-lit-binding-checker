@@ -536,6 +536,7 @@ function forAllNonUndefinedConstituentsAssignableTo(
                 }
                 
                 // Parse: "slotName - description" or "- Default slot" (empty name = default)
+                // Also handle "(default) - description" as default slot
                 const trimmed = comment?.trim() || '';
                 if (trimmed.startsWith('-')) {
                   // Default slot: "@slot - description"
@@ -544,7 +545,12 @@ function forAllNonUndefinedConstituentsAssignableTo(
                   // Named slot: "@slot slotName - description"
                   const parts = trimmed.split(/\s+-\s+|\s+/);
                   const slotName = parts[0]?.trim() || '';
-                  slots.add(slotName);
+                  // Recognize "(default)" as the default slot
+                  if (slotName === '(default)' || slotName === 'default') {
+                    slots.add('');
+                  } else {
+                    slots.add(slotName);
+                  }
                 }
               }
             }
@@ -656,20 +662,19 @@ function forAllNonUndefinedConstituentsAssignableTo(
         }
       }
 
-      // Track if this element is a child of a custom element without slot attr (default slot)
-      if (!isClosing && !hasSlotAttr) {
-        // Find nearest custom element parent
-        for (let i = stack.length - 1; i >= 0; i--) {
-          if (stack[i].tag.includes('-')) {
-            const key = `${stack[i].tag}:${stack[i].index}`;
-            if (!customElementsWithChildren.has(key)) {
-              customElementsWithChildren.set(key, { 
-                tag: stack[i].tag, 
-                index: stack[i].index,
-                hasDefaultSlotChild: true 
-              });
-            }
-            break;
+      // Track if this element is a DIRECT child of a custom element without slot attr (default slot)
+      // Only consider elements whose immediate parent is the custom element
+      if (!isClosing && !hasSlotAttr && stack.length > 0) {
+        const immediateParent = stack[stack.length - 1];
+        // Only flag if the immediate parent is a custom element
+        if (immediateParent.tag.includes('-')) {
+          const key = `${immediateParent.tag}:${immediateParent.index}`;
+          if (!customElementsWithChildren.has(key)) {
+            customElementsWithChildren.set(key, { 
+              tag: immediateParent.tag, 
+              index: immediateParent.index,
+              hasDefaultSlotChild: true 
+            });
           }
         }
       }
@@ -930,10 +935,10 @@ function forAllNonUndefinedConstituentsAssignableTo(
               eventType = checker.getTypeAtLocation(eventInfo.node);
               eventTypeStr = typeToString(eventType);
             } else if (eventInfo.fromJsDoc && eventInfo.detailType) {
-              // Type from JSDoc - we can't fully type-check but we can show the expected type
+              // Type from JSDoc - parse the detail type and compare with handler's expected detail
               eventTypeStr = `CustomEvent<${eventInfo.detailType}>`;
-              // For JSDoc types, we do a string-based comparison since we can't create a real type
               const handlerTypeStr = typeToString(firstParamType);
+              
               // Check if handler expects CustomEvent with compatible detail
               if (!handlerTypeStr.includes('CustomEvent') && !handlerTypeStr.includes('Event')) {
                 diags.push({
@@ -944,6 +949,169 @@ function forAllNonUndefinedConstituentsAssignableTo(
                   start: ev.expr.getStart(),
                   length: ev.expr.getWidth()
                 });
+                continue;
+              }
+              
+              // Extract the detail type from handler's CustomEvent<T> parameter
+              // Handle nested generics by counting angle brackets
+              const extractCustomEventDetail = (s: string): string | null => {
+                const startIdx = s.indexOf('CustomEvent<');
+                if (startIdx === -1) return null;
+                const detailStart = startIdx + 'CustomEvent<'.length;
+                let depth = 1;
+                let i = detailStart;
+                while (i < s.length && depth > 0) {
+                  if (s[i] === '<') depth++;
+                  else if (s[i] === '>') depth--;
+                  i++;
+                }
+                if (depth === 0) {
+                  return s.slice(detailStart, i - 1).trim();
+                }
+                return null;
+              };
+              
+              const handlerDetailStr = extractCustomEventDetail(handlerTypeStr);
+              if (handlerDetailStr) {
+                const expectedDetailStr = eventInfo.detailType.trim();
+                
+                // Parse object types into normalized form for comparison
+                // This handles property order differences like { a: X; b: Y } vs { b: Y, a: X }
+                const parseObjectType = (s: string): Map<string, string> | null => {
+                  const normalized = s.replace(/\s+/g, ' ').trim();
+                  if (!normalized.startsWith('{') || !normalized.endsWith('}')) return null;
+                  
+                  const inner = normalized.slice(1, -1).trim();
+                  if (!inner) return new Map();
+                  
+                  const props = new Map<string, string>();
+                  // Split by ; or , handling nested braces
+                  const parts: string[] = [];
+                  let depth = 0;
+                  let current = '';
+                  for (const char of inner) {
+                    if (char === '{') depth++;
+                    else if (char === '}') depth--;
+                    else if ((char === ';' || char === ',') && depth === 0) {
+                      if (current.trim()) parts.push(current.trim());
+                      current = '';
+                      continue;
+                    }
+                    current += char;
+                  }
+                  if (current.trim()) parts.push(current.trim());
+                  
+                  for (const part of parts) {
+                    const colonIdx = part.indexOf(':');
+                    if (colonIdx === -1) continue;
+                    let key = part.slice(0, colonIdx).trim();
+                    // Normalize optional key: "value?" -> "value"
+                    key = key.replace(/\?$/, '');
+                    const value = part.slice(colonIdx + 1).trim().replace(/;$/, '');
+                    props.set(key, value);
+                  }
+                  return props;
+                };
+                
+                const handlerProps = parseObjectType(handlerDetailStr);
+                const expectedProps = parseObjectType(expectedDetailStr);
+                
+                // Normalize array syntax: Array<T> -> T[] and vice versa
+                // Also strip generic parameters for comparison when JSDoc omits them
+                const normalizeArraySyntax = (s: string): string => {
+                  // Convert Array<T> to T[] (handle nested generics)
+                  let result = s;
+                  let changed = true;
+                  while (changed) {
+                    changed = false;
+                    const arrayMatch = result.match(/Array<([^<>]+|\w+<[^>]+>)>/);
+                    if (arrayMatch) {
+                      result = result.replace(arrayMatch[0], `${arrayMatch[1]}[]`);
+                      changed = true;
+                    }
+                  }
+                  return result;
+                };
+                
+                // Strip generic parameters from a type (e.g., RenderItem<string> -> RenderItem)
+                const stripGenerics = (s: string): string => {
+                  let result = '';
+                  let depth = 0;
+                  for (let i = 0; i < s.length; i++) {
+                    const char = s[i];
+                    if (char === '<') depth++;
+                    else if (char === '>') depth--;
+                    else if (depth === 0) result += char;
+                  }
+                  return result;
+                };
+                
+                // Check if types match, considering that JSDoc may omit generic params
+                const typesMatch = (handlerType: string, jsDocType: string): boolean => {
+                  // Normalize: remove whitespace, convert ; to , in objects, remove trailing separators
+                  const normalize = (s: string) => {
+                    let result = s.replace(/\s+/g, '');
+                    // Replace ; with , for object separators
+                    result = result.replace(/;/g, ',');
+                    // Remove trailing commas before }
+                    result = result.replace(/,}/g, '}');
+                    return normalizeArraySyntax(result);
+                  };
+                  
+                  // Normalize optional properties: "prop?:T", "prop?:T|undefined", "prop:T|undefined" are all equivalent
+                  const normalizeOptional = (s: string) => {
+                    let result = s;
+                    // Remove "undefined|" or "|undefined" from unions
+                    result = result.replace(/undefined\|/g, '');
+                    result = result.replace(/\|undefined/g, '');
+                    // Remove ? from optional properties
+                    result = result.replace(/\?:/g, ':');
+                    return result;
+                  };
+                  
+                  const h = normalizeOptional(normalize(handlerType));
+                  const j = normalizeOptional(normalize(jsDocType));
+                  if (h === j) return true;
+                  // If JSDoc type has no generics but handler does, compare without generics
+                  if (!jsDocType.includes('<') && handlerType.includes('<')) {
+                    return stripGenerics(h) === j;
+                  }
+                  return false;
+                };
+                
+                let isMatch = false;
+                if (handlerProps && expectedProps) {
+                  // Compare as object types (order-independent)
+                  if (handlerProps.size === expectedProps.size) {
+                    isMatch = true;
+                    for (const [key, value] of handlerProps) {
+                      const expectedValue = expectedProps.get(key);
+                      if (!expectedValue) {
+                        isMatch = false;
+                        break;
+                      }
+                      // Use typesMatch for generic-tolerant comparison
+                      if (!typesMatch(value, expectedValue)) {
+                        isMatch = false;
+                        break;
+                      }
+                    }
+                  }
+                } else {
+                  // Fallback: use typesMatch for generic-tolerant comparison
+                  isMatch = typesMatch(handlerDetailStr, expectedDetailStr);
+                }
+                
+                if (!isMatch) {
+                  diags.push({
+                    file: sf,
+                    category: ts.DiagnosticCategory.Error,
+                    code: 90031,
+                    messageText: `${clsName} → <${ev.tag}> @${ev.eventName} event detail type mismatch. Handler expects: ${handlerDetailStr}, event dispatches: ${expectedDetailStr}`,
+                    start: ev.expr.getStart(),
+                    length: ev.expr.getWidth()
+                  });
+                }
               }
               continue;
             } else {
