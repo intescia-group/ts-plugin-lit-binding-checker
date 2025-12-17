@@ -515,6 +515,186 @@ function forAllNonUndefinedConstituentsAssignableTo(
     return null;
   }
 
+  /** Parse @slot JSDoc tags from a class to get declared slots */
+  function getSlotsFromJsDoc(classDecl: ts.Node): Set<string> {
+    const slots = new Set<string>();
+    
+    const checkJsDoc = (node: ts.Node) => {
+      const jsDocs = (node as any).jsDoc as ts.JSDoc[] | undefined;
+      if (jsDocs) {
+        for (const jsDoc of jsDocs) {
+          if (jsDoc.tags) {
+            for (const tag of jsDoc.tags) {
+              if (tag.tagName.text === 'slot') {
+                let comment: string | undefined;
+                if (typeof tag.comment === 'string') {
+                  comment = tag.comment;
+                } else if (Array.isArray(tag.comment)) {
+                  comment = tag.comment.map((c: any) => c.text || '').join('');
+                } else if (tag.comment) {
+                  comment = String(tag.comment);
+                }
+                
+                // Parse: "slotName - description" or "- Default slot" (empty name = default)
+                const trimmed = comment?.trim() || '';
+                if (trimmed.startsWith('-')) {
+                  // Default slot: "@slot - description"
+                  slots.add('');
+                } else {
+                  // Named slot: "@slot slotName - description"
+                  const parts = trimmed.split(/\s+-\s+|\s+/);
+                  const slotName = parts[0]?.trim() || '';
+                  slots.add(slotName);
+                }
+              }
+            }
+          }
+        }
+      }
+    };
+
+    // Check class-level JSDoc
+    checkJsDoc(classDecl);
+
+    // Also check members (in case slots are documented on methods)
+    if (ts.isClassDeclaration(classDecl)) {
+      for (const member of classDecl.members) {
+        checkJsDoc(member);
+      }
+    }
+
+    return slots;
+  }
+
+  interface SlotUsage {
+    parentTag: string;
+    slotName: string; // empty string = default slot
+    indexInText: number;
+    isDefaultSlot: boolean;
+  }
+
+  /** Collect slot usages from a template, including default slot (children without slot attr) */
+  function collectSlotUsagesFromTemplate(
+    tagged: ts.TaggedTemplateExpression,
+    sf: ts.SourceFile
+  ): Array<SlotUsage> {
+    const out: Array<SlotUsage> = [];
+    const { text } = rebuildTemplateAndOffsets(tagged, sf);
+
+    // Scrub expressions but keep track of their positions
+    const scrubbed = text.replace(/\${[\S\s]*?}/g, (m) => '§'.repeat(m.length));
+
+    // Track parent tags using a stack approach
+    interface TagInfo {
+      tag: string;
+      isCustom: boolean;
+      startIndex: number;
+      endIndex: number;
+      isClosing: boolean;
+      isSelfClosing: boolean;
+      hasSlotAttr: boolean;
+    }
+    
+    const tags: TagInfo[] = [];
+    const tagRe = /<(\/?)([\da-z-]+)([^>]*?)(\/?)>/gi;
+    let m: RegExpExecArray | null;
+    
+    // Track which custom elements have children (for default slot detection)
+    const customElementsWithChildren = new Map<string, { tag: string; index: number; hasDefaultSlotChild: boolean }>();
+    
+    while ((m = tagRe.exec(scrubbed))) {
+      const isClosing = m[1] === '/';
+      const tagName = m[2].toLowerCase();
+      const attrsChunk = m[3];
+      const isSelfClosing = m[4] === '/' || ['br', 'hr', 'img', 'input', 'meta', 'link', 'area', 'base', 'col', 'embed', 'param', 'source', 'track', 'wbr'].includes(tagName);
+      const isCustom = tagName.includes('-');
+      
+      // Check if this tag has a slot attribute
+      const hasSlotAttr = !isClosing && attrsChunk ? /\bslot\s*=\s*["'][^"']*["']/i.test(attrsChunk) : false;
+      
+      tags.push({
+        tag: tagName,
+        isCustom,
+        startIndex: m.index,
+        endIndex: m.index + m[0].length,
+        isClosing,
+        isSelfClosing: isSelfClosing && !isClosing,
+        hasSlotAttr
+      });
+
+      // Build current stack to find parent
+      const stack: Array<{ tag: string; index: number }> = [];
+      for (const prevTag of tags.slice(0, -1)) {
+        if (prevTag.isClosing) {
+          if (stack.length > 0 && stack[stack.length - 1].tag === prevTag.tag) {
+            stack.pop();
+          }
+        } else if (!prevTag.isSelfClosing) {
+          stack.push({ tag: prevTag.tag, index: prevTag.startIndex });
+        }
+      }
+
+      // If this is an opening tag (not closing, not self-closing), check for slot attribute
+      if (!isClosing && attrsChunk) {
+        const slotMatch = /\bslot\s*=\s*["']([^"']*)["']/i.exec(attrsChunk);
+        if (slotMatch) {
+          const slotName = slotMatch[1];
+          const slotAttrIndex = m.index + m[0].indexOf(attrsChunk) + slotMatch.index;
+          
+          // Find the nearest custom element parent
+          for (let i = stack.length - 1; i >= 0; i--) {
+            if (stack[i].tag.includes('-')) {
+              out.push({
+                parentTag: stack[i].tag,
+                slotName,
+                indexInText: slotAttrIndex,
+                isDefaultSlot: false
+              });
+              break;
+            }
+          }
+        }
+      }
+
+      // Track if this element is a child of a custom element without slot attr (default slot)
+      if (!isClosing && !hasSlotAttr) {
+        // Find nearest custom element parent
+        for (let i = stack.length - 1; i >= 0; i--) {
+          if (stack[i].tag.includes('-')) {
+            const key = `${stack[i].tag}:${stack[i].index}`;
+            if (!customElementsWithChildren.has(key)) {
+              customElementsWithChildren.set(key, { 
+                tag: stack[i].tag, 
+                index: stack[i].index,
+                hasDefaultSlotChild: true 
+              });
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    // Check for text content between tags that would go to default slot
+    // Also add default slot usages for custom elements that have unslotted children
+    for (const [key, info] of customElementsWithChildren) {
+      // Find if we already have a default slot usage for this parent
+      const hasExplicitDefaultSlot = out.some(
+        o => o.parentTag === info.tag && o.slotName === '' && !o.isDefaultSlot
+      );
+      if (!hasExplicitDefaultSlot) {
+        out.push({
+          parentTag: info.tag,
+          slotName: '',
+          indexInText: info.index,
+          isDefaultSlot: true
+        });
+      }
+    }
+
+    return out;
+  }
+
   interface StaticAttr { tag: string; attr: string; booleanish: boolean; indexInText: number; }
   function isGlobalAttr(attr: string) {
     if (GLOBAL_ATTR_ALLOWLIST.has(attr)) return true;
@@ -783,6 +963,73 @@ function forAllNonUndefinedConstituentsAssignableTo(
                 start: ev.expr.getStart(),
                 length: ev.expr.getWidth()
               });
+            }
+          }
+
+          // 4) slot validation - check that slots used are declared in the component
+          const slotUsages = collectSlotUsagesFromTemplate(n, sf);
+          const { offsetToPos } = rebuildTemplateAndOffsets(n, sf);
+          
+          for (const slotUsage of slotUsages) {
+            if (isNativeTag(slotUsage.parentTag)) continue;
+
+            const elemExpr = scopedMap.get(slotUsage.parentTag);
+            if (!elemExpr) continue; // Component not in scopedElements, skip
+
+            // Resolve the component class
+            let componentClassDecl: ts.Node | null = null;
+            let symbol = checker.getSymbolAtLocation(elemExpr);
+            if (symbol) {
+              while (symbol.flags & ts.SymbolFlags.Alias) {
+                symbol = checker.getAliasedSymbol(symbol);
+              }
+              const declarations = symbol.getDeclarations();
+              if (declarations?.length) {
+                for (const decl of declarations) {
+                  if (ts.isClassDeclaration(decl)) {
+                    componentClassDecl = decl;
+                    break;
+                  }
+                }
+                if (!componentClassDecl) componentClassDecl = declarations[0];
+              }
+            }
+
+            if (!componentClassDecl) continue;
+
+            // Get declared slots from JSDoc
+            const declaredSlots = getSlotsFromJsDoc(componentClassDecl);
+            
+            // If no slots are declared in JSDoc, skip validation (component might not document slots)
+            if (declaredSlots.size === 0) continue;
+
+            // Check if the used slot is declared
+            if (!declaredSlots.has(slotUsage.slotName)) {
+              const pos = offsetToPos(slotUsage.indexInText);
+              const availableSlots = Array.from(declaredSlots)
+                .map(s => s === '' ? '(default)' : `"${s}"`)
+                .join(', ');
+              
+              if (slotUsage.isDefaultSlot) {
+                // Content without slot attribute going to default slot
+                diags.push({
+                  file: sf,
+                  category: ts.DiagnosticCategory.Warning,
+                  code: 90041,
+                  messageText: `${clsName} → <${slotUsage.parentTag}> has content without slot attribute, but no default slot is declared. Available slots: ${availableSlots}`,
+                  start: pos,
+                  length: slotUsage.parentTag.length + 1 // +1 for <
+                });
+              } else {
+                diags.push({
+                  file: sf,
+                  category: ts.DiagnosticCategory.Warning,
+                  code: 90040,
+                  messageText: `${clsName} → <${slotUsage.parentTag}> slot "${slotUsage.slotName}" is not declared. Available slots: ${availableSlots}`,
+                  start: pos,
+                  length: `slot="${slotUsage.slotName}"`.length
+                });
+              }
             }
           }
         }
