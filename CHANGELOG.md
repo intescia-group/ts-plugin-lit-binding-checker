@@ -1,3 +1,15 @@
+# [1.5.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.4.0...v1.5.0) (2025-12-17)
+
+
+### Bug Fixes
+
+* jsdocs of slots ([21c487b](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/21c487bca907881d26fd563e62d7622d6fbe0445))
+
+
+### Features
+
+* add event binding support with hover, go-to-definition and type checking ([c33eb3a](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/c33eb3a13c81c88bada2ee52a5a236445e59f792))
+
 # [1.4.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.3.1...v1.4.0) (2025-12-15)
 
 
