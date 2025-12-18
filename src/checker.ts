@@ -88,39 +88,52 @@ export function runChecksOnSourceFile(
   function readScopedElementsMapRaw(cls: ts.ClassDeclaration): ScopedMap {
     const map: ScopedMap = new Map();
     
-    // 1) Static scopedElements property
-    const staticProp = cls.members.find(
+    // Helper to extract entries from an object literal
+    const extractFromObjectLiteral = (obj: ts.ObjectLiteralExpression) => {
+      for (const p of obj.properties) if (ts.isPropertyAssignment(p)) {
+        const key = ts.isIdentifier(p.name) ? p.name.text : ts.isStringLiteral(p.name) ? p.name.text : undefined;
+        if (key) map.set(key, p.initializer);
+      }
+    };
+    
+    // 1) Static scopedElements property (open-wc)
+    const scopedElementsProp = cls.members.find(
       m => ts.isPropertyDeclaration(m) &&
       m.modifiers?.some(md => md.kind === ts.SyntaxKind.StaticKeyword) &&
       ts.isIdentifier(m.name) && m.name.text === 'scopedElements'
     ) as ts.PropertyDeclaration | undefined;
 
-    if (staticProp?.initializer && ts.isObjectLiteralExpression(staticProp.initializer)) {
-      for (const p of staticProp.initializer.properties) if (ts.isPropertyAssignment(p)) {
-        const key = ts.isIdentifier(p.name) ? p.name.text : ts.isStringLiteral(p.name) ? p.name.text : undefined;
-        if (key) map.set(key, p.initializer);
-      }
+    if (scopedElementsProp?.initializer && ts.isObjectLiteralExpression(scopedElementsProp.initializer)) {
+      extractFromObjectLiteral(scopedElementsProp.initializer);
     }
 
-    // 2) Static scopedElements getter
-    const staticGetter = cls.members.find(
+    // 2) Static elementDefinitions property (lit-labs/scoped-registry-mixin)
+    const elementDefinitionsProp = cls.members.find(
+      m => ts.isPropertyDeclaration(m) &&
+      m.modifiers?.some(md => md.kind === ts.SyntaxKind.StaticKeyword) &&
+      ts.isIdentifier(m.name) && m.name.text === 'elementDefinitions'
+    ) as ts.PropertyDeclaration | undefined;
+
+    if (elementDefinitionsProp?.initializer && ts.isObjectLiteralExpression(elementDefinitionsProp.initializer)) {
+      extractFromObjectLiteral(elementDefinitionsProp.initializer);
+    }
+
+    // 3) Static scopedElements getter (open-wc)
+    const scopedElementsGetter = cls.members.find(
       m => ts.isGetAccessor(m) &&
       m.modifiers?.some(md => md.kind === ts.SyntaxKind.StaticKeyword) &&
       ts.isIdentifier(m.name) && m.name.text === 'scopedElements'
     ) as ts.GetAccessorDeclaration | undefined;
 
-    if (staticGetter?.body) {
-      const ret = staticGetter.body.statements.find(st => ts.isReturnStatement(st)) as ts.ReturnStatement | undefined;
+    if (scopedElementsGetter?.body) {
+      const ret = scopedElementsGetter.body.statements.find(st => ts.isReturnStatement(st)) as ts.ReturnStatement | undefined;
       const expr = ret?.expression;
       if (expr && ts.isObjectLiteralExpression(expr)) {
-        for (const p of expr.properties) if (ts.isPropertyAssignment(p)) {
-          const key = ts.isIdentifier(p.name) ? p.name.text : ts.isStringLiteral(p.name) ? p.name.text : undefined;
-          if (key) map.set(key, p.initializer);
-        }
+        extractFromObjectLiteral(expr);
       }
     }
 
-    // 3) Dynamic this.registry?.define() calls throughout the class
+    // 4) Dynamic this.registry?.define() calls throughout the class
     const visitForRegistryDefine = (node: ts.Node) => {
       if (ts.isCallExpression(node)) {
         const expr = node.expression;
