@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.5.1...v1.6.0) (2025-12-18)
+
+
+### Features
+
+* handle @lit-labs/scoped-registry-mixin ([cd54c83](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/cd54c833361c5280275726976e02dccee77ddf7a))
+
 ## [1.5.1](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.5.0...v1.5.1) (2025-12-18)
 
 
