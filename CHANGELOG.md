@@ -1,3 +1,11 @@
+## [1.5.1](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.5.0...v1.5.1) (2025-12-18)
+
+
+### Bug Fixes
+
+* **checker:** improve slot detection and JSDoc event type validation ([ef3d4e7](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/ef3d4e7b9b989790a223b6afd4c6697bb98a7a42))
+* **parser:** handle nested braces in template literal expressions ([72e8c48](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/72e8c484188382cafd970dc9bf9a07bcdd5970fc))
+
 # [1.5.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.4.0...v1.5.0) (2025-12-17)
 
 
