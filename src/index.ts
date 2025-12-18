@@ -40,8 +40,32 @@ function findEventAtPosition(ts: TS, sf: ts.SourceFile, position: number): Event
         const templateText = template.getText();
         const templateStart = template.getStart();
 
-        // Mask ${...} expressions to avoid matching > inside them
-        const maskedText = templateText.replace(/\$\{[^}]*\}/g, (m) => '§'.repeat(m.length));
+        // Mask ${...} expressions handling nested braces
+        const maskExpressions = (text: string): string => {
+          let result = '';
+          let i = 0;
+          while (i < text.length) {
+            if (text[i] === '$' && text[i + 1] === '{') {
+              // Found ${, now find matching }
+              let depth = 1;
+              let j = i + 2;
+              while (j < text.length && depth > 0) {
+                if (text[j] === '{') depth++;
+                else if (text[j] === '}') depth--;
+                j++;
+              }
+              // Replace the whole ${...} with § characters
+              const exprLen = j - i;
+              result += '§'.repeat(exprLen);
+              i = j;
+            } else {
+              result += text[i];
+              i++;
+            }
+          }
+          return result;
+        };
+        const maskedText = maskExpressions(templateText);
 
         const tagRegex = /<([a-z][\w-]*)\s*([^>]*?)>/gi;
         let tagMatch: RegExpExecArray | null;
@@ -101,8 +125,32 @@ function findPropertyAtPosition(ts: TS, sf: ts.SourceFile, position: number): Pr
         const templateText = template.getText();
         const templateStart = template.getStart();
 
-        // Mask ${...} expressions to avoid matching > inside them (e.g., Array<T>)
-        const maskedText = templateText.replace(/\$\{[^}]*\}/g, (m) => '§'.repeat(m.length));
+        // Mask ${...} expressions handling nested braces
+        const maskExpressions = (text: string): string => {
+          let result = '';
+          let i = 0;
+          while (i < text.length) {
+            if (text[i] === '$' && text[i + 1] === '{') {
+              // Found ${, now find matching }
+              let depth = 1;
+              let j = i + 2;
+              while (j < text.length && depth > 0) {
+                if (text[j] === '{') depth++;
+                else if (text[j] === '}') depth--;
+                j++;
+              }
+              // Replace the whole ${...} with § characters
+              const exprLen = j - i;
+              result += '§'.repeat(exprLen);
+              i = j;
+            } else {
+              result += text[i];
+              i++;
+            }
+          }
+          return result;
+        };
+        const maskedText = maskExpressions(templateText);
         
         // Find all tags and their attributes/properties
         const tagRegex = /<([a-z][\w-]*)\s*([^>]*?)>/gi;
@@ -694,30 +742,21 @@ function init(modules: { typescript: TS }) {
             let detailType = 'unknown';
             if (eventResult) {
               if (eventResult.node && ts.isNewExpression(eventResult.node)) {
-                const typeArgs = eventResult.node.typeArguments;
-                if (typeArgs && typeArgs.length > 0) {
-                  // Explicit type argument: new CustomEvent<DetailType>(...)
-                  const typeNode = typeArgs[0];
-                  const resolvedType = checker.getTypeFromTypeNode(typeNode);
-                  detailType = checker.typeToString(resolvedType);
+                // Use getTypeAtLocation on the whole CustomEvent expression - TypeScript infers the type
+                const eventType = checker.getTypeAtLocation(eventResult.node);
+                const eventTypeStr = checker.typeToString(eventType);
+                
+                // Extract detail type from CustomEvent<T>
+                const match = eventTypeStr.match(/^CustomEvent<(.+)>$/);
+                if (match && match[1] !== 'unknown') {
+                  detailType = match[1];
                 } else {
-                  // No explicit type, try to infer from the options.detail
-                  // new CustomEvent('name', { detail: { ... } })
-                  const args = eventResult.node.arguments;
-                  if (args && args.length > 1) {
-                    const optionsArg = args[1];
-                    if (ts.isObjectLiteralExpression(optionsArg)) {
-                      const detailProp = optionsArg.properties.find(
-                        p => ts.isPropertyAssignment(p) && 
-                             ts.isIdentifier(p.name) && 
-                             p.name.text === 'detail'
-                      ) as ts.PropertyAssignment | undefined;
-                      
-                      if (detailProp) {
-                        const detailExprType = checker.getTypeAtLocation(detailProp.initializer);
-                        detailType = checker.typeToString(detailExprType);
-                      }
-                    }
+                  // Fallback: try explicit type arguments
+                  const typeArgs = eventResult.node.typeArguments;
+                  if (typeArgs && typeArgs.length > 0) {
+                    const typeNode = typeArgs[0];
+                    const resolvedType = checker.getTypeFromTypeNode(typeNode);
+                    detailType = checker.typeToString(resolvedType);
                   }
                 }
               } else if (eventResult.fromJsDoc && eventResult.detailType) {
