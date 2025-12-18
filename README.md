@@ -77,7 +77,6 @@ class MyInput extends LitElement { ... }
 ```
 
 > **Note:** For components distributed as `.d.ts` declaration files, only JSDoc `@fires` tags are available since the source code is not present.
-```
 
 ### Slot Documentation
 
@@ -98,7 +97,6 @@ class MyCard extends LitElement {
     `;
   }
 }
-```
 
 ## Installation
 
