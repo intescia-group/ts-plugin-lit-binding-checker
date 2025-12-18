@@ -44,22 +44,39 @@ class MyComponent extends ScopedRegistryHost(LitElement) {
 }
 ```
 
-### Event Documentation
+### Event Detection
 
-Document events with the `@fires` JSDoc tag:
+The plugin automatically detects events from your TypeScript code:
 
+**Automatic detection from `new CustomEvent()`**
 ```typescript
-/**
- * @fires value-changed - Emitted when value changes with `{ value: string }`.
- * @fires selection-changed - Emitted with `{ items: Item[] }`.
- */
 class MyInput extends LitElement {
   private onChange() {
+    // Plugin detects the event name and infers the detail type
     this.dispatchEvent(new CustomEvent('value-changed', {
       detail: { value: this.value }
     }));
   }
 }
+```
+
+**Explicit type annotation**
+```typescript
+this.dispatchEvent(new CustomEvent<{ value: string }>('value-changed', {
+  detail: { value: this.value }
+}));
+```
+
+**JSDoc `@fires` tag (useful for `.d.ts` files or documentation)**
+```typescript
+/**
+ * @fires value-changed - Emitted when value changes with `{ value: string }`.
+ * @fires selection-changed - Emitted with `{ items: Item[] }`.
+ */
+class MyInput extends LitElement { ... }
+```
+
+> **Note:** For components distributed as `.d.ts` declaration files, only JSDoc `@fires` tags are available since the source code is not present.
 ```
 
 ### Slot Documentation
