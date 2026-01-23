@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.6.0...v1.7.0) (2026-01-23)
+
+
+### Features
+
+* validate static attribute values against property types ([92987cc](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/92987cc0517f33e63600a6b6a52177f6bbb0b052))
+
 # [1.6.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.5.1...v1.6.0) (2025-12-18)
 
 
