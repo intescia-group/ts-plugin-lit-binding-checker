@@ -259,6 +259,69 @@ function forAllNonUndefinedConstituentsAssignableTo(
     return isOptional;
   }
 
+  /** Check if a static string value is assignable to a property type (handles enums, string literals, unions) */
+  function isStringAssignableToType(value: string, propType: ts.Type, typeChecker: ts.TypeChecker): boolean {
+    // If the propType accepts string, any string value is valid
+    if (propType.flags & ts.TypeFlags.String) return true;
+    if (propType.flags & ts.TypeFlags.Any) return true;
+
+    // Handle number types - Lit converts string attributes to numbers automatically
+    if (propType.flags & ts.TypeFlags.Number) {
+      // Check if the string value is a valid number
+      const num = Number(value);
+      return !isNaN(num);
+    }
+
+    // Handle number literal types
+    if (propType.isNumberLiteral()) {
+      const num = Number(value);
+      return !isNaN(num) && num === propType.value;
+    }
+
+    // Handle boolean types - Lit converts string attributes to booleans
+    if (propType.flags & ts.TypeFlags.Boolean || propType.flags & ts.TypeFlags.BooleanLiteral) {
+      // For boolean attributes, presence means true, absence means false
+      // String values like "true", "false", "" are typically handled by Lit
+      return true;
+    }
+
+    // Handle union types (e.g., "small" | "medium" | "large")
+    if (propType.isUnion()) {
+      return propType.types.some(t => isStringAssignableToType(value, t, typeChecker));
+    }
+
+    // Handle string literal types (e.g., "small")
+    if (propType.isStringLiteral()) {
+      return propType.value === value;
+    }
+
+    // Handle enum types - check if the value matches any enum member value
+    if (propType.flags & ts.TypeFlags.EnumLiteral) {
+      const symbol = propType.getSymbol();
+      if (symbol) {
+        // For enum literal types, the value is stored in the type
+        const literalType = propType as ts.LiteralType;
+        if (literalType.value !== undefined) {
+          return String(literalType.value) === value;
+        }
+      }
+    }
+
+    // Handle enum types by checking all member values
+    if (propType.getSymbol()?.flags && (propType.getSymbol()!.flags & ts.SymbolFlags.Enum)) {
+      const enumType = typeChecker.getBaseTypeOfLiteralType(propType);
+      if (enumType.isUnion()) {
+        return enumType.types.some(t => {
+          if (t.isStringLiteral()) return t.value === value;
+          const litType = t as ts.LiteralType;
+          return litType.value !== undefined && String(litType.value) === value;
+        });
+      }
+    }
+
+    return false;
+  }
+
   function getArrayElementType(t: ts.Type): ts.Type | null {
     if (arrayElemTypeCache.has(t)) return arrayElemTypeCache.get(t)!;
     const idx = checker.getIndexTypeOfType(t, ts.IndexKind.Number) ?? null;
@@ -713,7 +776,7 @@ function forAllNonUndefinedConstituentsAssignableTo(
     return out;
   }
 
-  interface StaticAttr { tag: string; attr: string; booleanish: boolean; indexInText: number; }
+  interface StaticAttr { tag: string; attr: string; booleanish: boolean; indexInText: number; value?: string; }
   function isGlobalAttr(attr: string) {
     if (GLOBAL_ATTR_ALLOWLIST.has(attr)) return true;
     if (/^aria-[\w-]+$/.test(attr)) return true;
@@ -767,8 +830,17 @@ function forAllNonUndefinedConstituentsAssignableTo(
         if (attrSliceStr.includes('§EXPR§')) continue; // FIX: vrai includes
         const hasEquals = attrSliceStr.includes('=');
 
+        // Extract the value from the original (non-masked) chunk
+        let value: string | undefined;
+        if (hasEquals) {
+          const valueMatch = attrSliceStr.match(/=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=>]+))/);
+          if (valueMatch) {
+            value = valueMatch[1] ?? valueMatch[2] ?? valueMatch[3];
+          }
+        }
+
         const indexInText = m.index + m[0].indexOf(attrsChunk) + attrStartInTag;
-        out.push({ tag, attr: name, booleanish: !hasEquals, indexInText });
+        out.push({ tag, attr: name, booleanish: !hasEquals, indexInText, value });
       }
     }
     return out;
@@ -881,6 +953,32 @@ function forAllNonUndefinedConstituentsAssignableTo(
                   messageText: `${clsName} → <${sa.tag}> attribut inconnu: ${sa.attr}`,
                   start: pos, length: sa.attr.length
                 });
+                continue;
+              }
+
+              // Validate attribute value against property type (for enums, string literals, etc.)
+              if (sa.value !== undefined) {
+                const propType = getPropTypeOnElementClass(instanceType, propName);
+                if (propType) {
+                  // Check if this is an enum or union of string literals - don't widen those
+                  const isEnumOrStringLiteralUnion = 
+                    (propType.flags & ts.TypeFlags.EnumLiteral) ||
+                    (propType.isUnion() && propType.types.every(t => 
+                      t.isStringLiteral() || (t.flags & ts.TypeFlags.EnumLiteral)
+                    ));
+                  
+                  // Widen literal types to base types (e.g., "" -> string) but not enums
+                  const propTypeToCheck = isEnumOrStringLiteralUnion ? propType : widenLiterals(propType);
+                  const isValidValue = isStringAssignableToType(sa.value, propTypeToCheck, checker);
+                  if (!isValidValue) {
+                    const expected = typeToString(propType);
+                    diags.push({
+                      file: sf, category: ts.DiagnosticCategory.Error, code: 90022,
+                      messageText: `${clsName} → <${sa.tag}> attribut "${sa.attr}" valeur invalide: "${sa.value}". Attendu: ${expected}`,
+                      start: pos, length: sa.attr.length + sa.value.length + 3 // attr="value"
+                    });
+                  }
+                }
               }
             }
           }
