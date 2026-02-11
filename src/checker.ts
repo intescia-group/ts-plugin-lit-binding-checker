@@ -25,6 +25,7 @@ export function runChecksOnSourceFile(
   const DEBUG_CACHE = !!opts.debugCache;
   const IGNORE_UNDEFINED = !!opts.ignoreUndefined;
   const IGNORE_ATTRIBUTE = !!opts.ignoreAttribute;
+  const IGNORE_EVENT = !!opts.ignoreEvent;
 
   // --- Caches (par exécution de diagnostics)
   const scopedElementsCache = new WeakMap<ts.ClassDeclaration, Map<string, ts.Expression>>();
@@ -1082,7 +1083,7 @@ function forAllNonUndefinedConstituentsAssignableTo(
           }
 
           // 3) @event bindings - validate handler types
-          for (const ev of collectEventBindingsFromTemplate(n)) {
+          if (!IGNORE_EVENT) for (const ev of collectEventBindingsFromTemplate(n)) {
             if (isNativeTag(ev.tag)) continue;
 
             const elemExpr = scopedMap.get(ev.tag);

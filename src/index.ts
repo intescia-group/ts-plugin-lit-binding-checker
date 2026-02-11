@@ -552,6 +552,7 @@ function init(modules: { typescript: TS }) {
     const config: PluginOptions = {
       ignoreUndefined: (info.config as any)?.ignoreUndefined ?? false,
       ignoreAttribute: (info.config as any)?.ignoreAttribute ?? false,
+      ignoreEvent: (info.config as any)?.ignoreEvent ?? false,
       debugCache: (info.config as any)?.debugCache ?? false,
       ignoreFiles: (info.config as any)?.ignoreFiles ?? [],
     };

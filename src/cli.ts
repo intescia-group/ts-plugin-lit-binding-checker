@@ -48,6 +48,7 @@ function formatDiag(sf: ts.SourceFile, d: ts.Diagnostic) {
   const opts: PluginOptions = {
     ignoreUndefined: process.argv.includes('--ignore-undefined'),
     ignoreAttribute: process.argv.includes('--ignore-attribute'),
+    ignoreEvent: process.argv.includes('--ignore-event'),
     debugCache: process.argv.includes('--debug-cache'),
     ignoreFiles,
   };

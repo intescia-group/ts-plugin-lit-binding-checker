@@ -6,6 +6,8 @@ export interface PluginOptions {
 ignoreUndefined?: boolean;
 /** Ignore attribute checks (only keep .prop checks). */
 ignoreAttribute?: boolean;
+/** Ignore event binding checks. */
+ignoreEvent?: boolean;
 /** Print lightweight cache traces to tsserver log. */
 debugCache?: boolean;
 /** List of regex patterns to ignore files. */

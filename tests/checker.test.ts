@@ -407,6 +407,23 @@ describe('unknown event warning (90032)', () => {
     expect(warns[0].message).toContain('clear');
     expect(warns[1].message).toContain('ack');
   });
+
+  it('skips event checks when ignoreEvent is set', () => {
+    const diags = check(`
+      class ChildEl extends LitElement {
+        fire() { this.dispatchEvent(new CustomEvent<number>('count-changed', { detail: 1 })); }
+      }
+      class Host extends ScopedElementsMixin(LitElement) {
+        static scopedElements = { 'child-el': ChildEl };
+        handler(e: CustomEvent<string>) {}
+        render() {
+          return html\`<child-el @count-changed=\${this.handler} @unknown=\${this.handler}></child-el>\`;
+        }
+      }
+    `, { ignoreEvent: true });
+    expect(diags.filter((d) => d.code === 90030)).toHaveLength(0);
+    expect(diags.filter((d) => d.code === 90032)).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
