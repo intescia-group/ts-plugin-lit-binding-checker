@@ -858,10 +858,40 @@ function forAllNonUndefinedConstituentsAssignableTo(
     sf: ts.SourceFile
   ): Array<StaticAttr> {
     const out: Array<StaticAttr> = [];
-    const { text } = rebuildTemplateAndOffsets(tagged, sf);
+    const { text: origText } = rebuildTemplateAndOffsets(tagged, sf);
 
-    // 1) scrub les expressions ${...}
-    const scrubbed = text.replace(/\${[\S\s]*?}/g, '§EXPR§');
+    // 1) Build text with §EXPR§ markers in place of expressions so that
+    //    dynamic attribute bindings (attr=${expr}) are correctly identified.
+    //    rebuildTemplateAndOffsets strips expressions, so the old regex scrub
+    //    was a no-op. We rebuild with explicit markers here.
+    let scrubbed: string;
+    // Cumulative extra chars inserted by markers, used to map positions back
+    const markerOffsets: Array<{ markerPos: number; cumulative: number }> = [];
+    if (!ts.isTemplateExpression(tagged.template)) {
+      scrubbed = origText;
+    } else {
+      const MARKER = '§EXPR§';
+      const parts: string[] = [tagged.template.head.text];
+      let cum = 0;
+      let cursor = tagged.template.head.text.length;
+      for (const span of tagged.template.templateSpans) {
+        cum += MARKER.length;
+        markerOffsets.push({ markerPos: cursor + cum - MARKER.length, cumulative: cum });
+        parts.push(MARKER);
+        parts.push(span.literal.text);
+        cursor += span.literal.text.length;
+      }
+      scrubbed = parts.join('');
+    }
+    // Convert a position in `scrubbed` to a position in `origText`
+    const scrubbedToOrig = (pos: number): number => {
+      let offset = 0;
+      for (const m of markerOffsets) {
+        if (pos >= m.markerPos + 6) offset = m.cumulative;
+        else break;
+      }
+      return pos - offset;
+    };
 
     // util: masquer les contenus entre guillemets en gardant la même longueur
     const maskQuoted = (s: string) =>
@@ -907,7 +937,7 @@ function forAllNonUndefinedConstituentsAssignableTo(
           }
         }
 
-        const indexInText = m.index + m[0].indexOf(attrsChunk) + attrStartInTag;
+        const indexInText = scrubbedToOrig(m.index + m[0].indexOf(attrsChunk) + attrStartInTag);
         out.push({ tag, attr: name, booleanish: !hasEquals, indexInText, value });
       }
     }
