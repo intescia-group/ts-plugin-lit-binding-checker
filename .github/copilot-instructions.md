@@ -5,9 +5,11 @@
 ```bash
 yarn build          # Compile TypeScript (tsc -p tsconfig.build.json) → dist/
 yarn check          # Run the CLI checker on this repo (node dist/cli.js tsconfig.json --ignore-undefined)
+npm test            # Run unit tests (vitest)
+npx vitest run tests/checker.test.ts -t "reports type mismatch"  # Run a single test by name
 ```
 
-There are no tests or linters configured. The only validation is `yarn build` (must compile cleanly).
+There are no linters configured. Validation: `yarn build` (must compile cleanly) + `npm test`.
 
 Releases are automated via semantic-release on the `main` branch — use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `chore:`, etc.).
 

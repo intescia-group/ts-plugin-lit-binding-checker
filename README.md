@@ -176,6 +176,7 @@ npx lit-binding-check tsconfig.json --ignore-files "**/*.test.ts" "**/*.spec.ts"
 | `90012` | Property type mismatch |
 | `90020` | Attribute on unresolved element (warning) |
 | `90021` | Unknown attribute on component (warning) |
+| `90022` | Attribute value type mismatch |
 | `90030` | Event handler type mismatch |
 | `90031` | Event detail type mismatch (JSDoc-based) |
 | `90032` | Event not declared on component (warning) |
