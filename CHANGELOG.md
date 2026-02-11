@@ -1,3 +1,14 @@
+# [1.8.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.7.0...v1.8.0) (2026-02-11)
+
+
+### Features
+
+* add some tests ([e617af3](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/e617af367efa298275204e811d647e5074fec195))
+* add way to ignore event checking ([8069f39](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/8069f39b7295c64019e97cb01a40849850254737))
+* better handling properties with attributes ([0efcb3b](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/0efcb3b1c8c91aacedee91acdc27a59890c67601))
+* handle events even if jsdoc is not present ([f4845f0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/f4845f00994ec12d4df59b6234870b882c288b37))
+* increase events detection ([c37b45d](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/c37b45d7893ed497133211e488524cfdbb99c83b))
+
 # [1.7.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.6.0...v1.7.0) (2026-01-23)
 
 
