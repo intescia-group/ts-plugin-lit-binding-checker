@@ -1112,20 +1112,20 @@ function forAllNonUndefinedConstituentsAssignableTo(
             // Find the CustomEvent dispatch in the component (or JSDoc)
             const eventInfo = findCustomEventInClass(componentClassDecl, ev.eventName);
             if (!eventInfo) {
-              // Warn if the component explicitly declares events but this one isn't among them
               const declaredEvents = getCachedDeclaredEvents(componentClassDecl);
-              if (declaredEvents.size > 0) {
-                const clsSymbol = checker.getSymbolAtLocation(elemExpr);
-                const clsLabel = clsSymbol?.getName() ?? ev.tag;
-                diags.push({
-                  file: sf,
-                  category: ts.DiagnosticCategory.Warning,
-                  code: 90032,
-                  messageText: `${clsName} → <${ev.tag}> @${ev.eventName} event not declared on ${clsLabel}. Declared events: ${[...declaredEvents].join(', ')}`,
-                  start: ev.expr.getStart(),
-                  length: ev.expr.getWidth(),
-                });
-              }
+              const clsSymbol = checker.getSymbolAtLocation(elemExpr);
+              const clsLabel = clsSymbol?.getName() ?? ev.tag;
+              const declaredList = declaredEvents.size > 0
+                ? `. Declared events: ${[...declaredEvents].join(', ')}`
+                : ' (no events declared)';
+              diags.push({
+                file: sf,
+                category: ts.DiagnosticCategory.Warning,
+                code: 90032,
+                messageText: `${clsName} → <${ev.tag}> @${ev.eventName} event not declared on ${clsLabel}${declaredList}`,
+                start: ev.expr.getStart(),
+                length: ev.expr.getWidth(),
+              });
               continue;
             }
 

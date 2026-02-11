@@ -372,7 +372,7 @@ describe('unknown event warning (90032)', () => {
     expect(diags.filter((d) => d.code === 90032)).toHaveLength(0);
   });
 
-  it('does not warn when component declares no events', () => {
+  it('warns when component declares no events at all', () => {
     const diags = check(`
       class ChildEl extends LitElement {}
       class Host extends ScopedElementsMixin(LitElement) {
@@ -383,7 +383,29 @@ describe('unknown event warning (90032)', () => {
         }
       }
     `);
-    expect(diags.filter((d) => d.code === 90032)).toHaveLength(0);
+    const warns = diags.filter((d) => d.code === 90032);
+    expect(warns).toHaveLength(1);
+    expect(warns[0].category).toBe(ts.DiagnosticCategory.Warning);
+    expect(warns[0].message).toContain('anything');
+    expect(warns[0].message).toContain('no events declared');
+  });
+
+  it('warns for each undeclared event when component declares no events', () => {
+    const diags = check(`
+      class ChildEl extends LitElement {}
+      class Host extends ScopedElementsMixin(LitElement) {
+        static scopedElements = { 'child-el': ChildEl };
+        handleClear() {}
+        handleAck() {}
+        render() {
+          return html\`<child-el @clear=\${this.handleClear} @ack=\${this.handleAck}></child-el>\`;
+        }
+      }
+    `);
+    const warns = diags.filter((d) => d.code === 90032);
+    expect(warns).toHaveLength(2);
+    expect(warns[0].message).toContain('clear');
+    expect(warns[1].message).toContain('ack');
   });
 });
 
