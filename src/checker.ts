@@ -591,6 +591,74 @@ function forAllNonUndefinedConstituentsAssignableTo(
     return null;
   }
 
+  /** Collect all declared event names from JSDoc @fires/@event tags and new CustomEvent(...) dispatches */
+  function getAllDeclaredEvents(classDecl: ts.Node): Set<string> {
+    const events = new Set<string>();
+
+    // Collect from JSDoc @fires / @event tags
+    const checkJsDoc = (node: ts.Node) => {
+      const jsDocs = (node as any).jsDoc as ts.JSDoc[] | undefined;
+      if (jsDocs) {
+        for (const jsDoc of jsDocs) {
+          if (jsDoc.tags) {
+            for (const tag of jsDoc.tags) {
+              if (tag.tagName.text === 'fires' || tag.tagName.text === 'event') {
+                let comment: string | undefined;
+                if (typeof tag.comment === 'string') {
+                  comment = tag.comment;
+                } else if (Array.isArray(tag.comment)) {
+                  comment = tag.comment.map((c: any) => c.text || '').join('');
+                } else if (tag.comment) {
+                  comment = String(tag.comment);
+                }
+                const parts = comment?.split(/\s+-\s+|\s+/) || [];
+                const evName = parts[0]?.trim();
+                if (evName) events.add(evName);
+              }
+            }
+          }
+        }
+      }
+    };
+
+    checkJsDoc(classDecl);
+    if (ts.isClassDeclaration(classDecl)) {
+      for (const member of classDecl.members) {
+        checkJsDoc(member);
+      }
+    }
+
+    // Collect from new CustomEvent('name', ...) dispatches in source
+    const visit = (node: ts.Node) => {
+      if (ts.isNewExpression(node)) {
+        const expr = node.expression;
+        if (ts.isIdentifier(expr) && expr.text === 'CustomEvent') {
+          const args = node.arguments;
+          if (args && args.length > 0) {
+            const firstArg = args[0];
+            if (ts.isStringLiteral(firstArg)) {
+              events.add(firstArg.text);
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(classDecl, visit);
+
+    return events;
+  }
+
+  const declaredEventsCache = new WeakMap<ts.Node, Set<string>>();
+  function getCachedDeclaredEvents(classDecl: ts.Node): Set<string> {
+    let cached = declaredEventsCache.get(classDecl);
+    if (!cached) {
+      cached = getAllDeclaredEvents(classDecl);
+      declaredEventsCache.set(classDecl, cached);
+    }
+    return cached;
+  }
+
   /** Parse @slot JSDoc tags from a class to get declared slots */
   function getSlotsFromJsDoc(classDecl: ts.Node): Set<string> {
     const slots = new Set<string>();
@@ -1013,7 +1081,23 @@ function forAllNonUndefinedConstituentsAssignableTo(
 
             // Find the CustomEvent dispatch in the component (or JSDoc)
             const eventInfo = findCustomEventInClass(componentClassDecl, ev.eventName);
-            if (!eventInfo) continue; // Event not found, might be bubbled from child
+            if (!eventInfo) {
+              // Warn if the component explicitly declares events but this one isn't among them
+              const declaredEvents = getCachedDeclaredEvents(componentClassDecl);
+              if (declaredEvents.size > 0) {
+                const clsSymbol = checker.getSymbolAtLocation(elemExpr);
+                const clsLabel = clsSymbol?.getName() ?? ev.tag;
+                diags.push({
+                  file: sf,
+                  category: ts.DiagnosticCategory.Warning,
+                  code: 90032,
+                  messageText: `${clsName} → <${ev.tag}> @${ev.eventName} event not declared on ${clsLabel}. Declared events: ${[...declaredEvents].join(', ')}`,
+                  start: ev.expr.getStart(),
+                  length: ev.expr.getWidth(),
+                });
+              }
+              continue;
+            }
 
             // Get the handler type
             const handlerType = checker.getTypeAtLocation(ev.expr);

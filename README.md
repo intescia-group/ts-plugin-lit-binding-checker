@@ -178,6 +178,7 @@ npx lit-binding-check tsconfig.json --ignore-files "**/*.test.ts" "**/*.spec.ts"
 | `90021` | Unknown attribute on component (warning) |
 | `90030` | Event handler type mismatch |
 | `90031` | Event detail type mismatch (JSDoc-based) |
+| `90032` | Event not declared on component (warning) |
 | `90040` | Named slot not declared on component (warning) |
 | `90041` | Default slot content but no default slot declared (warning) |
 
