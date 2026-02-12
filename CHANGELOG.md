@@ -1,3 +1,10 @@
+# [1.9.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.8.0...v1.9.0) (2026-02-12)
+
+
+### Features
+
+* ignore standard events ([7180372](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/71803726db1645fce3ee8cc14b6a9b9652459d3d))
+
 # [1.8.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.7.0...v1.8.0) (2026-02-11)
 
 

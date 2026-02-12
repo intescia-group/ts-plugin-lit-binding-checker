@@ -1,6 +1,6 @@
 {
   "name": "@intescia/ts-plugin-lit-binding-checker",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "TypeScript Language Service plugin: checks Lit templates .prop bindings & static attributes against child components (scopedElements).",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
