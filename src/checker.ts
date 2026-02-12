@@ -39,6 +39,40 @@ export function runChecksOnSourceFile(
   const isNativeTag = (tag: string) => (!tag.includes('-')) || KNOWN_HTML_TAGS.has(tag) || KNOWN_SVG_TAGS.has(tag);
   const kebabToCamel = (s: string) => s.replace(/-([\da-z])/g, (_m, c: string) => c.toUpperCase());
 
+  const NATIVE_EVENTS = new Set([
+    // Mouse
+    'click', 'dblclick', 'mousedown', 'mouseup', 'mousemove',
+    'mouseenter', 'mouseleave', 'mouseover', 'mouseout', 'contextmenu',
+    // Keyboard
+    'keydown', 'keyup', 'keypress',
+    // Focus
+    'focus', 'blur', 'focusin', 'focusout',
+    // Form
+    'input', 'change', 'submit', 'reset', 'invalid',
+    // Touch
+    'touchstart', 'touchend', 'touchmove', 'touchcancel',
+    // Pointer
+    'pointerdown', 'pointerup', 'pointermove', 'pointerenter',
+    'pointerleave', 'pointerover', 'pointerout', 'pointercancel',
+    'gotpointercapture', 'lostpointercapture',
+    // Drag
+    'drag', 'dragstart', 'dragend', 'dragenter', 'dragleave', 'dragover', 'drop',
+    // Clipboard
+    'copy', 'cut', 'paste',
+    // Scroll / Wheel
+    'scroll', 'wheel',
+    // Animation / Transition
+    'animationstart', 'animationend', 'animationiteration', 'animationcancel',
+    'transitionstart', 'transitionend', 'transitionrun', 'transitioncancel',
+    // Media
+    'play', 'pause', 'ended', 'volumechange', 'seeking', 'seeked',
+    'timeupdate', 'loadeddata', 'loadedmetadata', 'canplay', 'canplaythrough',
+    'waiting', 'playing', 'ratechange', 'durationchange', 'stalled', 'suspend', 'emptied',
+    // Misc
+    'load', 'error', 'abort', 'resize', 'select', 'fullscreenchange', 'fullscreenerror',
+    'toggle', 'beforetoggle', 'slotchange',
+  ]);
+
   /** Find property name on element matching attribute (case-insensitive) */
   function findPropertyNameForAttribute(elemInstanceType: ts.Type, attrName: string): string | null {
     // First try exact match with kebab-to-camel conversion
@@ -1109,6 +1143,9 @@ function forAllNonUndefinedConstituentsAssignableTo(
             }
 
             if (!componentClassDecl) continue;
+
+            // Skip native DOM events (click, blur, focus, etc.)
+            if (NATIVE_EVENTS.has(ev.eventName)) continue;
 
             // Find the CustomEvent dispatch in the component (or JSDoc)
             const eventInfo = findCustomEventInClass(componentClassDecl, ev.eventName);

@@ -424,6 +424,44 @@ describe('unknown event warning (90032)', () => {
     expect(diags.filter((d) => d.code === 90030)).toHaveLength(0);
     expect(diags.filter((d) => d.code === 90032)).toHaveLength(0);
   });
+
+  it('does not warn for native DOM events (click, blur, focus, etc.)', () => {
+    const diags = check(`
+      class ChildEl extends LitElement {}
+      class Host extends ScopedElementsMixin(LitElement) {
+        static scopedElements = { 'child-el': ChildEl };
+        handleClick() {}
+        handleBlur() {}
+        handleFocus() {}
+        handleKeydown() {}
+        render() {
+          return html\`<child-el
+            @click=\${this.handleClick}
+            @blur=\${this.handleBlur}
+            @focus=\${this.handleFocus}
+            @keydown=\${this.handleKeydown}
+          ></child-el>\`;
+        }
+      }
+    `);
+    expect(diags.filter((d) => d.code === 90032)).toHaveLength(0);
+  });
+
+  it('still warns for custom events alongside native ones', () => {
+    const diags = check(`
+      class ChildEl extends LitElement {}
+      class Host extends ScopedElementsMixin(LitElement) {
+        static scopedElements = { 'child-el': ChildEl };
+        handler() {}
+        render() {
+          return html\`<child-el @click=\${this.handler} @my-custom=\${this.handler}></child-el>\`;
+        }
+      }
+    `);
+    const warns = diags.filter((d) => d.code === 90032);
+    expect(warns).toHaveLength(1);
+    expect(warns[0].message).toContain('my-custom');
+  });
 });
 
 // ---------------------------------------------------------------------------
