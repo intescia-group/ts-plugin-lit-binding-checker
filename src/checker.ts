@@ -961,6 +961,10 @@ function forAllNonUndefinedConstituentsAssignableTo(
         // slice original (non masqué) pour les checks
         const attrSliceStr = attrsChunk.slice(attrStartInTag, attrStartInTag + a[0].length);
         if (attrSliceStr.includes('§EXPR§')) continue; // FIX: vrai includes
+        // Skip matches that are part of a §EXPR§ marker (standalone directive like ref())
+        const charBefore = attrStartInTag > 0 ? attrsChunk[attrStartInTag - 1] : '';
+        const charAfter = attrsChunk[attrStartInTag + a[0].length] ?? '';
+        if (charBefore === '§' || charAfter === '§') continue;
         const hasEquals = attrSliceStr.includes('=');
 
         // Extract the value from the original (non-masked) chunk

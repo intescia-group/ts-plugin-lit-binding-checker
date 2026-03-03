@@ -593,3 +593,86 @@ describe('scoped elements resolution', () => {
     expect(diags.filter((d) => d.code === 90010)).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Lit directives (ref, spread, etc.)
+// ---------------------------------------------------------------------------
+describe('Lit directives', () => {
+  const base = `
+    class ChildEl extends LitElement {
+      value: number = 0;
+      label: string = '';
+    }
+    declare function ref(r: any): any;
+    declare function classMap(c: Record<string, boolean>): any;
+    declare function styleMap(s: Record<string, string>): any;
+    declare function spread(o: any): any;
+  `;
+
+  it('ignores ref() directive as standalone expression in a tag', () => {
+    const diags = check(`
+      ${base}
+      class Host extends ScopedElementsMixin(LitElement) {
+        static scopedElements = { 'child-el': ChildEl };
+        tableRef: any;
+        render() {
+          return html\`<child-el
+            \${ref(this.tableRef)}
+            .value=\${42}
+          ></child-el>\`;
+        }
+      }
+    `);
+    expect(diags).toHaveLength(0);
+  });
+
+  it('still validates .prop bindings alongside ref()', () => {
+    const diags = check(`
+      ${base}
+      class Host extends ScopedElementsMixin(LitElement) {
+        static scopedElements = { 'child-el': ChildEl };
+        tableRef: any;
+        render() {
+          return html\`<child-el
+            \${ref(this.tableRef)}
+            .value=\${"wrong type"}
+          ></child-el>\`;
+        }
+      }
+    `);
+    expect(diags.filter((d) => d.code === 90012)).toHaveLength(1);
+  });
+
+  it('ignores ref() directive with other directives like classMap', () => {
+    const diags = check(`
+      ${base}
+      class Host extends ScopedElementsMixin(LitElement) {
+        static scopedElements = { 'child-el': ChildEl };
+        tableRef: any;
+        render() {
+          return html\`<child-el
+            \${ref(this.tableRef)}
+            class=\${classMap({ flex: true })}
+            .value=\${42}
+          ></child-el>\`;
+        }
+      }
+    `);
+    expect(diags).toHaveLength(0);
+  });
+
+  it('ignores spread directive as standalone expression', () => {
+    const diags = check(`
+      ${base}
+      class Host extends ScopedElementsMixin(LitElement) {
+        static scopedElements = { 'child-el': ChildEl };
+        render() {
+          return html\`<child-el
+            \${spread({ value: 42 })}
+          ></child-el>\`;
+        }
+      }
+    `);
+    expect(diags).toHaveLength(0);
+  });
+});
