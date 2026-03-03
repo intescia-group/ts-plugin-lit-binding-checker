@@ -1,3 +1,10 @@
+## [1.9.1](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.9.0...v1.9.1) (2026-03-03)
+
+
+### Bug Fixes
+
+* ignore standalone Lit directives (ref, spread, etc.) in static attribute checks ([0c69799](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/0c69799825adb147606ce60e8edb353b7081b3e8))
+
 # [1.9.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.8.0...v1.9.0) (2026-02-12)
 
 
