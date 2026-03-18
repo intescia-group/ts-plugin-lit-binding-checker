@@ -1272,9 +1272,13 @@ function forAllNonUndefinedConstituentsAssignableTo(
                     const colonIdx = part.indexOf(':');
                     if (colonIdx === -1) continue;
                     let key = part.slice(0, colonIdx).trim();
-                    // Normalize optional key: "value?" -> "value"
+                    const isOptional = key.endsWith('?');
                     key = key.replace(/\?$/, '');
-                    const value = part.slice(colonIdx + 1).trim().replace(/;$/, '');
+                    let value = part.slice(colonIdx + 1).trim().replace(/;$/, '');
+                    // Reflect optional marker as union with undefined
+                    if (isOptional && !value.includes('undefined')) {
+                      value = `${value} | undefined`;
+                    }
                     props.set(key, value);
                   }
                   return props;
@@ -1325,23 +1329,25 @@ function forAllNonUndefinedConstituentsAssignableTo(
                     return normalizeArraySyntax(result);
                   };
                   
-                  // Normalize optional properties: "prop?:T", "prop?:T|undefined", "prop:T|undefined" are all equivalent
-                  const normalizeOptional = (s: string) => {
+                  // Strip undefined unions and optional markers from a type string
+                  const stripOptional = (s: string) => {
                     let result = s;
-                    // Remove "undefined|" or "|undefined" from unions
                     result = result.replace(/undefined\|/g, '');
                     result = result.replace(/\|undefined/g, '');
-                    // Remove ? from optional properties
                     result = result.replace(/\?:/g, ':');
                     return result;
                   };
                   
-                  const h = normalizeOptional(normalize(handlerType));
-                  const j = normalizeOptional(normalize(jsDocType));
+                  const h = normalize(handlerType);
+                  const j = normalize(jsDocType);
                   if (h === j) return true;
+                  // Allow handler to be more permissive (accepting undefined when event doesn't emit it)
+                  // but NOT the reverse (event emits undefined, handler ignores it)
+                  const hStripped = stripOptional(h);
+                  if (hStripped === j) return true;
                   // If JSDoc type has no generics but handler does, compare without generics
                   if (!jsDocType.includes('<') && handlerType.includes('<')) {
-                    return stripGenerics(h) === j;
+                    return stripGenerics(hStripped) === j;
                   }
                   return false;
                 };

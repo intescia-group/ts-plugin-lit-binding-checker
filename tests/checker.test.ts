@@ -326,6 +326,45 @@ describe('event bindings (@event)', () => {
     `);
     expect(diags.filter((d) => d.code === 90030)).toHaveLength(0);
   });
+
+  it('reports detail type mismatch when @fires has union with undefined (90031)', () => {
+    const diags = check(`
+      /**
+       * @fires date-from-changed - Emitted when start date changes with \`{ value: number | undefined }\`.
+       */
+      class DatePicker extends LitElement {}
+      class Host extends ScopedElementsMixin(LitElement) {
+        static scopedElements = { 'date-picker': DatePicker };
+        dateFrom = '';
+        private handleDateFromChanged({ detail }: CustomEvent<{ value: number }>) {
+          this.dateFrom = detail.value.toString();
+        }
+        render() {
+          return html\`<date-picker @date-from-changed=\${this.handleDateFromChanged}></date-picker>\`;
+        }
+      }
+    `);
+    const errs = diags.filter((d) => d.code === 90031);
+    expect(errs).toHaveLength(1);
+    expect(errs[0].message).toContain('date-from-changed');
+  });
+
+  it('accepts handler with wider type (undefined) than @fires detail (90031)', () => {
+    const diags = check(`
+      /**
+       * @fires value-changed - Emitted with \`{ value: number }\`.
+       */
+      class MyInput extends LitElement {}
+      class Host extends ScopedElementsMixin(LitElement) {
+        static scopedElements = { 'my-input': MyInput };
+        handler(e: CustomEvent<{ value: number | undefined }>) {}
+        render() {
+          return html\`<my-input @value-changed=\${this.handler}></my-input>\`;
+        }
+      }
+    `);
+    expect(diags.filter((d) => d.code === 90031)).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
