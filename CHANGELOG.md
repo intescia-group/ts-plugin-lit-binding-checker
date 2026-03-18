@@ -1,3 +1,10 @@
+## [1.9.2](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.9.1...v1.9.2) (2026-03-18)
+
+
+### Bug Fixes
+
+* detect event detail type mismatch when [@fires](https://github.com/fires) declares union with undefined ([d88318a](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/d88318aed6afb1d5774a85b3ae98c52d238aabf9))
+
 ## [1.9.1](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.9.0...v1.9.1) (2026-03-03)
 
 
