@@ -751,6 +751,132 @@ function forAllNonUndefinedConstituentsAssignableTo(
     return slots;
   }
 
+  /** Parse @property / @attr JSDoc tags from a class to discover declared properties */
+  function getPropertiesFromJsDoc(classDecl: ts.Node): Set<string> {
+    const props = new Set<string>();
+
+    const checkJsDoc = (node: ts.Node) => {
+      const jsDocs = (node as any).jsDoc as ts.JSDoc[] | undefined;
+      if (jsDocs) {
+        for (const jsDoc of jsDocs) {
+          if (jsDoc.tags) {
+            for (const tag of jsDoc.tags) {
+              if (tag.tagName.text === 'property' || tag.tagName.text === 'prop'
+                  || tag.tagName.text === 'attr' || tag.tagName.text === 'attribute') {
+                let comment: string | undefined;
+                if (typeof tag.comment === 'string') {
+                  comment = tag.comment;
+                } else if (Array.isArray(tag.comment)) {
+                  comment = tag.comment.map((c: any) => c.text || '').join('');
+                } else if (tag.comment) {
+                  comment = String(tag.comment);
+                }
+
+                const trimmed = comment?.trim() || '';
+                // Parse: "{type} name - desc" or "{type} name" or "name - desc" or "name"
+                // Also handle "[name]" and "[name=default]"
+                let rest = trimmed;
+                // Skip type in braces: {string=}
+                if (rest.startsWith('{')) {
+                  const closeBrace = rest.indexOf('}');
+                  if (closeBrace !== -1) rest = rest.slice(closeBrace + 1).trim();
+                }
+                // Extract name (possibly in brackets)
+                let name: string | undefined;
+                if (rest.startsWith('[')) {
+                  const closeBracket = rest.indexOf(']');
+                  if (closeBracket !== -1) {
+                    const inner = rest.slice(1, closeBracket);
+                    name = inner.split('=')[0].trim();
+                  }
+                } else {
+                  name = rest.split(/\s+-\s+|\s+/)[0]?.trim();
+                }
+                if (name) props.add(name);
+              }
+            }
+          }
+        }
+      }
+    };
+
+    checkJsDoc(classDecl);
+    if (ts.isClassDeclaration(classDecl)) {
+      for (const member of classDecl.members) {
+        checkJsDoc(member);
+      }
+    }
+
+    return props;
+  }
+
+  const jsDocPropsCache = new WeakMap<ts.Node, Set<string>>();
+
+  /** Get JSDoc properties for a class, walking up the class hierarchy */
+  function getJsDocPropertiesWithHierarchy(classDecl: ts.Node): Set<string> {
+    const cached = jsDocPropsCache.get(classDecl);
+    if (cached) return cached;
+
+    const allProps = new Set<string>();
+
+    // Collect from this class
+    for (const p of getPropertiesFromJsDoc(classDecl)) allProps.add(p);
+
+    // Walk up the hierarchy using the type checker
+    if (ts.isClassDeclaration(classDecl) && classDecl.name) {
+      const sym = checker.getSymbolAtLocation(classDecl.name);
+      if (sym) {
+        const classType = checker.getDeclaredTypeOfSymbol(sym);
+        const baseTypes = classType.getBaseTypes?.() ?? [];
+        for (const baseType of baseTypes) {
+          const baseSymbol = baseType.getSymbol();
+          if (baseSymbol) {
+            const decls = baseSymbol.getDeclarations();
+            if (decls) {
+              for (const decl of decls) {
+                for (const p of getJsDocPropertiesWithHierarchy(decl)) allProps.add(p);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    jsDocPropsCache.set(classDecl, allProps);
+    return allProps;
+  }
+
+  /** Resolve the class declaration from a scopedElements expression */
+  function getClassDeclFromExpression(expr: ts.Expression): ts.Node | null {
+    let symbol = checker.getSymbolAtLocation(expr);
+    if (!symbol) return null;
+    while (symbol.flags & ts.SymbolFlags.Alias) {
+      symbol = checker.getAliasedSymbol(symbol);
+    }
+    const declarations = symbol.getDeclarations();
+    if (!declarations?.length) return null;
+    for (const decl of declarations) {
+      if (ts.isClassDeclaration(decl)) return decl;
+    }
+    return declarations[0];
+  }
+
+  /** Check if a property name (or attribute name) exists in JSDoc @property tags */
+  function hasPropertyInJsDoc(classDecl: ts.Node, propName: string): boolean {
+    const jsDocProps = getJsDocPropertiesWithHierarchy(classDecl);
+    // Exact match
+    if (jsDocProps.has(propName)) return true;
+    // kebab-to-camel match
+    const camel = kebabToCamel(propName);
+    if (jsDocProps.has(camel)) return true;
+    // Case-insensitive match
+    const lower = propName.toLowerCase();
+    for (const p of jsDocProps) {
+      if (p.toLowerCase() === lower) return true;
+    }
+    return false;
+  }
+
   interface SlotUsage {
     parentTag: string;
     slotName: string; // empty string = default slot
@@ -1021,6 +1147,12 @@ function forAllNonUndefinedConstituentsAssignableTo(
             const instanceType = getInstanceTypeFromClassRef(elemExpr) || checker.getTypeAtLocation(elemExpr);
             const propType = getPropTypeOnElementClass(instanceType, b.prop);
             if (!propType) {
+              // Fall back to JSDoc @property declarations
+              const componentClassDecl = getClassDeclFromExpression(elemExpr);
+              if (componentClassDecl && hasPropertyInJsDoc(componentClassDecl, b.prop)) {
+                // Property declared in JSDoc — skip type checking (no TS type available)
+                continue;
+              }
               diags.push({
                 file: sf, category: ts.DiagnosticCategory.Error, code: 90011,
                 messageText: `${clsName} → <${b.tag}> .${b.prop} introuvable sur la classe`,
@@ -1085,6 +1217,12 @@ function forAllNonUndefinedConstituentsAssignableTo(
               const instanceType = getInstanceTypeFromClassRef(elemExpr) || checker.getTypeAtLocation(elemExpr);
               const propName = findPropertyNameForAttribute(instanceType, sa.attr);
               if (!propName) {
+                // Fall back to JSDoc @property / @attr declarations
+                const componentClassDecl = getClassDeclFromExpression(elemExpr);
+                if (componentClassDecl && hasPropertyInJsDoc(componentClassDecl, sa.attr)) {
+                  // Attribute matches a JSDoc-declared property — skip validation
+                  continue;
+                }
                 diags.push({
                   file: sf, category: ts.DiagnosticCategory.Warning, code: 90021,
                   messageText: `${clsName} → <${sa.tag}> attribut inconnu: ${sa.attr}`,

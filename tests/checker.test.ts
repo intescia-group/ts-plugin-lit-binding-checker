@@ -715,3 +715,106 @@ describe('Lit directives', () => {
     expect(diags).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// JSDoc @property declarations
+// ---------------------------------------------------------------------------
+describe('JSDoc @property declarations', () => {
+  const childWithJsDoc = `
+    /**
+     * @property {string=} value - value input
+     * @property {string} placeholder - placeholder input
+     * @property {number=} maxLength - maxLength input
+     * @property {boolean} invalid - invalid input
+     * @attr charCounter - charCounter input
+     */
+    class JsDocChild extends LitElement {
+      render() { return html\`<div></div>\`; }
+    }
+  `;
+
+  it('accepts .prop binding for JSDoc-declared property (no 90011)', () => {
+    const diags = check(`
+      ${childWithJsDoc}
+      class Host extends ScopedElementsMixin(LitElement) {
+        static scopedElements = { 'jsdoc-child': JsDocChild };
+        render() {
+          return html\`<jsdoc-child .value=\${"hello"}></jsdoc-child>\`;
+        }
+      }
+    `);
+    expect(diags.filter((d) => d.code === 90011)).toHaveLength(0);
+  });
+
+  it('skips type checking for JSDoc-declared property (no 90012)', () => {
+    const diags = check(`
+      ${childWithJsDoc}
+      class Host extends ScopedElementsMixin(LitElement) {
+        static scopedElements = { 'jsdoc-child': JsDocChild };
+        render() {
+          return html\`<jsdoc-child .value=\${123}></jsdoc-child>\`;
+        }
+      }
+    `);
+    // Even though JSDoc says {string=}, we skip type checking — no 90012
+    expect(diags.filter((d) => d.code === 90012)).toHaveLength(0);
+  });
+
+  it('still reports unknown property not in JSDoc (90011)', () => {
+    const diags = check(`
+      ${childWithJsDoc}
+      class Host extends ScopedElementsMixin(LitElement) {
+        static scopedElements = { 'jsdoc-child': JsDocChild };
+        render() {
+          return html\`<jsdoc-child .nonExistent=\${1}></jsdoc-child>\`;
+        }
+      }
+    `);
+    expect(diags.filter((d) => d.code === 90011)).toHaveLength(1);
+  });
+
+  it('accepts static attribute matching JSDoc property (no 90021)', () => {
+    const diags = check(`
+      ${childWithJsDoc}
+      class Host extends ScopedElementsMixin(LitElement) {
+        static scopedElements = { 'jsdoc-child': JsDocChild };
+        render() {
+          return html\`<jsdoc-child placeholder="hello"></jsdoc-child>\`;
+        }
+      }
+    `, { ignoreAttribute: false });
+    expect(diags.filter((d) => d.code === 90021)).toHaveLength(0);
+  });
+
+  it('accepts static attribute matching JSDoc @attr (no 90021)', () => {
+    const diags = check(`
+      ${childWithJsDoc}
+      class Host extends ScopedElementsMixin(LitElement) {
+        static scopedElements = { 'jsdoc-child': JsDocChild };
+        render() {
+          return html\`<jsdoc-child charCounter></jsdoc-child>\`;
+        }
+      }
+    `, { ignoreAttribute: false });
+    expect(diags.filter((d) => d.code === 90021)).toHaveLength(0);
+  });
+
+  it('supports JSDoc @property on parent class (inheritance)', () => {
+    const diags = check(`
+      /**
+       * @property {string} parentProp - from parent
+       */
+      class ParentEl extends LitElement {
+        render() { return html\`<div></div>\`; }
+      }
+      class ChildEl extends ParentEl {}
+      class Host extends ScopedElementsMixin(LitElement) {
+        static scopedElements = { 'child-el': ChildEl };
+        render() {
+          return html\`<child-el .parentProp=\${"hello"}></child-el>\`;
+        }
+      }
+    `);
+    expect(diags.filter((d) => d.code === 90011)).toHaveLength(0);
+  });
+});
