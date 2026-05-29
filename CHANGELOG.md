@@ -1,3 +1,10 @@
+# [1.10.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.9.2...v1.10.0) (2026-05-29)
+
+
+### Features
+
+* support JSDoc [@property](https://github.com/property) and [@attr](https://github.com/attr) tags for property/attribute validation ([53f3683](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/53f3683e7600847d887e6a3532ab3a11f5f47824))
+
 ## [1.9.2](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.9.1...v1.9.2) (2026-03-18)
 
 
