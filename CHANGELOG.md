@@ -1,3 +1,10 @@
+# [1.11.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.10.0...v1.11.0) (2026-05-29)
+
+
+### Features
+
+* force new release ([a97f08a](https://github.com/intescia-group/ts-plugin-lit-binding-checker/commit/a97f08aeb151a8778735443b9dd07e57636ca831))
+
 # [1.10.0](https://github.com/intescia-group/ts-plugin-lit-binding-checker/compare/v1.9.2...v1.10.0) (2026-05-29)
 
 
